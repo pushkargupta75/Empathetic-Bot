@@ -1,4 +1,4 @@
-# Empathetic AI Assistant
+# Empathetic-Bot
 
 A real-time multimodal chatbot that reads facial emotions through webcam feed and provides empathetic responses using advanced language models. Built with Flask, OpenCV, and Hugging Face Transformers.
 
@@ -27,14 +27,6 @@ A real-time multimodal chatbot that reads facial emotions through webcam feed an
 - Emotion context integration in conversations
 - Connection status monitoring
 - Camera controls and error handling
-
-## 🛠️ Tech Stack
-
-- **Backend**: Flask, Flask-SocketIO, Python 3.10+
-- **Computer Vision**: OpenCV, MediaPipe
-- **Machine Learning**: Hugging Face Transformers, PyTorch
-- **Frontend**: Vanilla JavaScript, Socket.IO, CSS3
-- **Deployment**: Docker, WSGI compatible
 
 ## 🔧 Installation
 
@@ -90,21 +82,6 @@ docker run -p 5000:5000 empathetic-ai
 4. **Empathetic Responses**: AI responds based on your emotional state
 5. **Real-time Updates**: Emotion detection runs continuously while chatting
 
-## 🎨 Design Features
-
-### Color Scheme
-- **Primary Background**: Deep navy (#0f172a)
-- **Secondary Background**: Slate gray (#1e293b) 
-- **Accent Color**: Emerald green (#10b981)
-- **Highlight Color**: Amber orange (#f59e0b)
-- **Text**: Clean whites and grays for optimal contrast
-
-### UI Components
-- Professional card-based layout
-- Smooth animations and micro-interactions
-- Responsive grid system
-- Real-time emotion indicators
-- Typing indicators and status updates
 
 ## 🔒 Privacy & Ethics
 
@@ -131,18 +108,6 @@ PORT=5000
 
 ## 🧪 Development
 
-### Project Structure
-```
-empathetic-ai-assistant/
-├── app.py                 # Flask application and SocketIO handlers
-├── requirements.txt       # Python dependencies
-├── Dockerfile            # Container configuration
-├── static/
-│   ├── style.css         # Professional dark theme styles
-│   └── script.js         # Frontend JavaScript and WebRTC
-└── templates/
-    └── index.html        # Main application template
-```
 
 ### Key Components
 - **EmotionDetector**: Handles video processing and face detection
@@ -165,16 +130,6 @@ empathetic-ai-assistant/
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- **MediaPipe**: For robust face detection capabilities
-- **Hugging Face**: For transformer models and easy ML integration
-- **Flask-SocketIO**: For real-time web communication
-- **OpenCV**: For computer vision functionality
 
 ## 🆘 Troubleshooting
 
