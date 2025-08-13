@@ -1,0 +1,13 @@
+flask==2.3.3
+flask-socketio==5.3.6
+opencv-python==4.8.1.78
+torch==2.1.0
+torchvision==0.16.0
+transformers==4.35.2
+numpy==1.24.3
+pillow==10.0.1
+python-socketio==5.9.0
+eventlet==0.33.3
+mediapipe==0.10.8
+huggingface-hub==0.17.3
+accelerate==0.24.1

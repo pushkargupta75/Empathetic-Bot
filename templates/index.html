@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Empathetic AI Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">🧠</div>
+                    <h1>Empathetic AI</h1>
+                </div>
+                <div class="status-indicator">
+                    <div class="status-dot" id="connectionStatus"></div>
+                    <span class="status-text" id="statusText">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel - Video & Emotion -->
+            <div class="left-panel">
+                <div class="video-section">
+                    <div class="video-container">
+                        <video id="videoElement" autoplay muted playsinline></video>
+                        <canvas id="canvasElement" style="display: none;"></canvas>
+                        <div class="video-overlay">
+                            <div class="camera-controls">
+                                <button id="toggleCamera" class="control-btn">
+                                    <span class="camera-icon">📷</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="emotion-display">
+                        <div class="emotion-header">
+                            <h3>Emotion Detection</h3>
+                            <div class="privacy-note">🔒 Processing locally</div>
+                        </div>
+                        
+                        <div class="emotion-content" id="emotionContent">
+                            <div class="emotion-indicator">
+                                <div class="emotion-emoji" id="emotionEmoji">😐</div>
+                                <div class="emotion-details">
+                                    <div class="emotion-label" id="emotionLabel">Neutral</div>
+                                    <div class="confidence-bar">
+                                        <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                                    </div>
+                                    <div class="confidence-text" id="confidenceText">0%</div>
+                                </div>
+                            </div>
+                            
+                            <div class="face-status" id="faceStatus">
+                                <span class="status-icon">👤</span>
+                                <span>Looking for face...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Chat -->
+            <div class="right-panel">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h3>Empathetic Conversation</h3>
+                        <div class="chat-subtitle">AI that understands your emotions</div>
+                    </div>
+                    
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message assistant-message">
+                            <div class="message-avatar">🤖</div>
+                            <div class="message-content">
+                                <div class="message-text">
+                                    Hello! I'm your empathetic AI assistant. I can see your emotions through your camera and respond accordingly. How are you feeling today?
+                                </div>
+                                <div class="message-time">Just now</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-container">
+                        <div class="emotion-context" id="emotionContext" style="display: none;">
+                            <span class="context-label">Current mood:</span>
+                            <span class="context-emotion" id="contextEmotion">neutral</span>
+                        </div>
+                        
+                        <div class="chat-input-wrapper">
+                            <input 
+                                type="text" 
+                                id="messageInput" 
+                                placeholder="Share your thoughts..." 
+                                maxlength="500"
+                            >
+                            <button id="sendButton" class="send-btn">
+                                <span class="send-icon">→</span>
+                            </button>
+                        </div>
+                        
+                        <div class="input-footer">
+                            <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                                <span class="typing-dot"></span>
+                                <span class="typing-dot"></span>
+                                <span class="typing-dot"></span>
+                                <span class="typing-text">AI is thinking...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
