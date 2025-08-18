@@ -1,4 +1,4 @@
-class EmpathyChatBot {
+class EnhancedEmpathyBot {
     constructor() {
         this.socket = io();
         this.isVideoActive = false;
@@ -6,7 +6,9 @@ class EmpathyChatBot {
         this.canvasElement = document.getElementById('canvasElement');
         this.context = this.canvasElement.getContext('2d');
         this.lastEmotionUpdate = Date.now();
-        this.emotionUpdateInterval = 500; // Update emotion every 500ms
+        this.emotionUpdateInterval = 500;
+        this.currentImage = null;
+        this.geminiAvailable = false;
         
         this.init();
     }
@@ -15,32 +17,48 @@ class EmpathyChatBot {
         this.setupSocketListeners();
         this.setupUIEventListeners();
         this.setupVideoStream();
+        this.setupMultimodal();
         this.updateConnectionStatus();
     }
     
     setupSocketListeners() {
         // Connection events
         this.socket.on('connect', () => {
-            console.log('Connected to server');
+            console.log('✅ Connected to Enhanced Empathetic AI');
             this.updateConnectionStatus(true);
-            this.showStatusMessage('Connected to Empathetic AI', 'success');
+            this.showStatusMessage('Connected to Enhanced AI', 'success');
         });
         
         this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
+            console.log('❌ Disconnected from server');
             this.updateConnectionStatus(false);
             this.showStatusMessage('Connection lost. Reconnecting...', 'error');
         });
         
-        // Emotion detection responses
+        // Status and capabilities
+        this.socket.on('status', (data) => {
+            this.geminiAvailable = data.gemini_available;
+            this.updateGeminiStatus();
+            this.showStatusMessage(data.message, 'success');
+        });
+        
+        // Emotion detection
         this.socket.on('emotion_update', (data) => {
             this.updateEmotionDisplay(data);
         });
         
         // Chat responses
         this.socket.on('chat_response', (data) => {
-            this.addMessage(data.message, 'assistant', data.emotion_context);
+            this.addMessage(data.message, 'assistant', {
+                emotion_context: data.emotion_context,
+                image_analysis: data.image_analysis
+            });
             this.hideTypingIndicator();
+        });
+        
+        // Image analysis results
+        this.socket.on('image_analysis_result', (data) => {
+            this.showImageAnalysis(data.analysis);
         });
         
         // Error handling
@@ -49,17 +67,13 @@ class EmpathyChatBot {
             this.showStatusMessage(data.message || 'An error occurred', 'error');
             this.hideTypingIndicator();
         });
-        
-        // Status updates
-        this.socket.on('status', (data) => {
-            this.showStatusMessage(data.message, 'info');
-        });
     }
     
     setupUIEventListeners() {
-        // Chat input handling
+        // Chat input
         const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
+        const sendBtn = document.getElementById('sendBtn');
+        const imageBtn = document.getElementById('imageBtn');
         
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -68,19 +82,66 @@ class EmpathyChatBot {
             }
         });
         
-        sendButton.addEventListener('click', () => {
-            this.sendMessage();
+        messageInput.addEventListener('input', (e) => {
+            this.adjustTextareaHeight(e.target);
         });
         
-        // Camera toggle
-        const toggleCamera = document.getElementById('toggleCamera');
-        toggleCamera.addEventListener('click', () => {
+        sendBtn.addEventListener('click', () => this.sendMessage());
+        imageBtn.addEventListener('click', () => this.triggerImageUpload());
+        
+        // Camera controls
+        document.getElementById('toggleCamera').addEventListener('click', () => {
             this.toggleVideoStream();
         });
         
-        // Auto-resize message input
-        messageInput.addEventListener('input', (e) => {
-            this.adjustInputHeight(e.target);
+        // Quick capture
+        document.getElementById('quickCapture').addEventListener('click', () => {
+            this.quickCapture();
+        });
+        
+        // Image analysis buttons
+        document.getElementById('analyzeBtn').addEventListener('click', () => {
+            this.analyzeCurrentImage();
+        });
+        
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            this.clearImagePreview();
+        });
+    }
+    
+    setupMultimodal() {
+        const imageInput = document.getElementById('imageInput');
+        const uploadArea = document.getElementById('imageUploadArea');
+        
+        // File input change
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                this.handleImageUpload(e.target.files[0]);
+            }
+        });
+        
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files[0] && files[0].type.startsWith('image/')) {
+                this.handleImageUpload(files[0]);
+            }
+        });
+        
+        uploadArea.addEventListener('click', () => {
+            imageInput.click();
         });
     }
     
@@ -98,7 +159,6 @@ class EmpathyChatBot {
             this.videoElement.srcObject = stream;
             this.isVideoActive = true;
             
-            // Start emotion detection after video loads
             this.videoElement.addEventListener('loadedmetadata', () => {
                 this.startEmotionDetection();
             });
@@ -106,7 +166,7 @@ class EmpathyChatBot {
             this.showStatusMessage('Camera activated successfully', 'success');
             
         } catch (error) {
-            console.error('Error accessing camera:', error);
+            console.error('Camera error:', error);
             this.showCameraError();
             this.showStatusMessage('Camera access denied or unavailable', 'error');
         }
@@ -116,7 +176,10 @@ class EmpathyChatBot {
         if (!this.isVideoActive) return;
         
         const processFrame = () => {
-            if (!this.isVideoActive || this.videoElement.paused) return;
+            if (!this.isVideoActive || this.videoElement.paused || document.hidden) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
             
             const now = Date.now();
             if (now - this.lastEmotionUpdate < this.emotionUpdateInterval) {
@@ -125,23 +188,17 @@ class EmpathyChatBot {
             }
             
             try {
-                // Set canvas size to match video
                 this.canvasElement.width = this.videoElement.videoWidth;
                 this.canvasElement.height = this.videoElement.videoHeight;
                 
-                // Draw current video frame to canvas
                 this.context.drawImage(this.videoElement, 0, 0);
-                
-                // Convert canvas to base64 image data
                 const imageData = this.canvasElement.toDataURL('image/jpeg', 0.7);
                 
-                // Send frame to server for emotion detection
                 this.socket.emit('video_frame', { image: imageData });
-                
                 this.lastEmotionUpdate = now;
                 
             } catch (error) {
-                console.error('Error processing video frame:', error);
+                console.error('Frame processing error:', error);
             }
             
             requestAnimationFrame(processFrame);
@@ -151,102 +208,213 @@ class EmpathyChatBot {
     }
     
     updateEmotionDisplay(emotionData) {
-        const emotionEmoji = document.getElementById('emotionEmoji');
-        const emotionLabel = document.getElementById('emotionLabel');
-        const confidenceFill = document.getElementById('confidenceFill');
-        const confidenceText = document.getElementById('confidenceText');
-        const faceStatus = document.getElementById('faceStatus');
-        const emotionContext = document.getElementById('emotionContext');
-        const contextEmotion = document.getElementById('contextEmotion');
+        const elements = {
+            emoji: document.getElementById('emotionEmoji'),
+            label: document.getElementById('emotionLabel'),
+            confidenceFill: document.getElementById('confidenceFill'),
+            confidenceText: document.getElementById('confidenceText'),
+            faceStatus: document.getElementById('faceStatus'),
+            emotionContext: document.getElementById('emotionContext'),
+            contextEmotion: document.getElementById('contextEmotion')
+        };
         
         // Emotion emoji mapping
         const emojiMap = {
             'happy': '😊',
             'sad': '😢',
             'angry': '😠',
-            'fearful': '😰',
-            'surprised': '😲',
-            'disgusted': '🤢',
+            'fear': '😰',
+            'surprise': '😲',
+            'disgust': '🤢',
             'neutral': '😐'
         };
         
-        // Update emotion display with animation
-        const emoji = emojiMap[emotionData.emotion] || '😐';
+        const emotion = emotionData.emotion || 'neutral';
         const confidence = Math.round((emotionData.confidence || 0) * 100);
+        const emoji = emojiMap[emotion] || '😐';
         
-        // Add transition animation
-        emotionEmoji.classList.add('emotion-transition');
-        setTimeout(() => emotionEmoji.classList.remove('emotion-transition'), 600);
+        // Update with animations
+        elements.emoji.classList.add('emotion-transition');
+        setTimeout(() => elements.emoji.classList.remove('emotion-transition'), 600);
         
-        emotionEmoji.textContent = emoji;
-        emotionLabel.textContent = emotionData.emotion || 'neutral';
-        confidenceFill.style.width = `${confidence}%`;
-        confidenceText.textContent = `${confidence}%`;
+        elements.emoji.textContent = emoji;
+        elements.label.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+        elements.confidenceFill.style.width = `${confidence}%`;
+        elements.confidenceText.textContent = `${confidence}% confidence`;
         
-        // Update face detection status
+        // Face detection status
         if (emotionData.face_detected) {
-            faceStatus.classList.add('detected');
-            faceStatus.innerHTML = '<span class="status-icon">✓</span><span>Face detected</span>';
+            elements.faceStatus.classList.add('detected');
+            elements.faceStatus.innerHTML = '<i class="fas fa-check-circle"></i><span>Face detected</span>';
         } else {
-            faceStatus.classList.remove('detected');
-            faceStatus.innerHTML = '<span class="status-icon">👤</span><span>Looking for face...</span>';
+            elements.faceStatus.classList.remove('detected');
+            elements.faceStatus.innerHTML = '<i class="fas fa-search"></i><span>Looking for face...</span>';
         }
         
-        // Update chat context
-        if (emotionData.face_detected && emotionData.emotion !== 'neutral') {
-            emotionContext.style.display = 'block';
-            contextEmotion.textContent = emotionData.emotion;
+        // Chat context
+        if (emotionData.face_detected && emotion !== 'neutral') {
+            elements.emotionContext.style.display = 'flex';
+            elements.contextEmotion.textContent = emotion;
         } else {
-            emotionContext.style.display = 'none';
+            elements.emotionContext.style.display = 'none';
         }
         
-        // Color code confidence bar based on emotion
+        // Color coding based on emotion
         const emotionColors = {
             'happy': '#22c55e',
-            'sad': '#3b82f6',
+            'sad': '#8b5cf6',
             'angry': '#ef4444',
-            'fearful': '#8b5cf6',
-            'surprised': '#f59e0b',
-            'disgusted': '#6b7280',
+            'fear': '#d946ef',
+            'surprise': '#eab308',
+            'disgust': '#6b7280',
             'neutral': '#10b981'
         };
         
-        const emotionColor = emotionColors[emotionData.emotion] || '#10b981';
-        confidenceFill.style.background = `linear-gradient(90deg, ${emotionColor}, ${emotionColor}cc)`;
+        const color = emotionColors[emotion] || '#10b981';
+        elements.confidenceFill.style.background = `linear-gradient(90deg, ${color}, ${color}cc)`;
     }
     
     sendMessage() {
         const messageInput = document.getElementById('messageInput');
         const message = messageInput.value.trim();
         
-        if (!message) return;
+        if (!message && !this.currentImage) return;
         
         // Add user message to chat
-        this.addMessage(message, 'user');
-        
-        // Clear input
-        messageInput.value = '';
-        this.adjustInputHeight(messageInput);
+        if (message) {
+            this.addMessage(message, 'user');
+        }
         
         // Show typing indicator
         this.showTypingIndicator();
         
+        // Prepare message data
+        const messageData = { message: message || 'Analyze this image' };
+        if (this.currentImage) {
+            messageData.image = this.currentImage;
+            messageData.image_prompt = message || 'Analyze this image and describe what you see in detail';
+        }
+        
         // Send message to server
-        this.socket.emit('chat_message', { message: message });
+        this.socket.emit('chat_message', messageData);
+        
+        // Clear input and image
+        messageInput.value = '';
+        this.adjustTextareaHeight(messageInput);
+        if (this.currentImage) {
+            this.clearImagePreview();
+        }
     }
     
-    addMessage(content, sender, emotionContext = null) {
+    handleImageUpload(file) {
+        if (!file.type.startsWith('image/')) {
+            this.showStatusMessage('Please select a valid image file', 'error');
+            return;
+        }
+        
+        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+            this.showStatusMessage('Image size must be less than 10MB', 'error');
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            this.currentImage = e.target.result;
+            this.showImagePreview(e.target.result);
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    showImagePreview(imageData) {
+        const previewContainer = document.getElementById('imagePreview');
+        const previewImage = document.getElementById('previewImage');
+        
+        previewImage.src = imageData;
+        previewContainer.style.display = 'block';
+        previewContainer.classList.add('fade-in');
+    }
+    
+    clearImagePreview() {
+        const previewContainer = document.getElementById('imagePreview');
+        previewContainer.style.display = 'none';
+        this.currentImage = null;
+    }
+    
+    quickCapture() {
+        if (!this.isVideoActive) {
+            this.showStatusMessage('Camera not available', 'error');
+            return;
+        }
+        
+        try {
+            this.canvasElement.width = this.videoElement.videoWidth;
+            this.canvasElement.height = this.videoElement.videoHeight;
+            this.context.drawImage(this.videoElement, 0, 0);
+            
+            const capturedImage = this.canvasElement.toDataURL('image/jpeg', 0.8);
+            this.currentImage = capturedImage;
+            this.showImagePreview(capturedImage);
+            
+            this.showStatusMessage('Image captured successfully!', 'success');
+        } catch (error) {
+            console.error('Capture error:', error);
+            this.showStatusMessage('Failed to capture image', 'error');
+        }
+    }
+    
+    analyzeCurrentImage() {
+        if (!this.currentImage) {
+            this.showStatusMessage('No image to analyze', 'error');
+            return;
+        }
+        
+        this.socket.emit('analyze_image', {
+            image: this.currentImage,
+            prompt: 'Analyze this image in detail and describe everything you see'
+        });
+        
+        this.showStatusMessage('Analyzing image...', 'info');
+    }
+    
+    showImageAnalysis(analysis) {
+        this.addMessage('Image Analysis Result:', 'assistant', { image_analysis: analysis });
+    }
+    
+    triggerImageUpload() {
+        document.getElementById('imageInput').click();
+    }
+    
+    addMessage(content, sender, context = null) {
         const chatMessages = document.getElementById('chatMessages');
         const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}-message`;
+        messageDiv.className = `message ${sender}-message fade-in`;
         
-        const avatar = sender === 'user' ? '👤' : '🤖';
+        const avatar = sender === 'user' 
+            ? '<i class="fas fa-user"></i>' 
+            : '<i class="fas fa-robot"></i>';
+        
         const timestamp = this.formatTimestamp(new Date());
         
         let emotionInfo = '';
-        if (sender === 'assistant' && emotionContext && emotionContext.emotion !== 'neutral') {
-            const confidence = Math.round((emotionContext.confidence || 0) * 100);
-            emotionInfo = `<div class="emotion-info">Responding to your ${emotionContext.emotion} mood (${confidence}% confidence)</div>`;
+        if (sender === 'assistant' && context?.emotion_context && context.emotion_context.emotion !== 'neutral') {
+            const emotion = context.emotion_context.emotion;
+            const confidence = Math.round((context.emotion_context.confidence || 0) * 100);
+            emotionInfo = `
+                <div class="emotion-context" style="margin-top: 0.5rem; display: flex;">
+                    <i class="fas fa-heart"></i>
+                    <span>Responding to your ${emotion} mood (${confidence}% confidence)</span>
+                </div>
+            `;
+        }
+        
+        let imageAnalysisInfo = '';
+        if (context?.image_analysis) {
+            imageAnalysisInfo = `
+                <div class="image-analysis">
+                    <strong><i class="fas fa-eye"></i> Vision Analysis:</strong>
+                    <div style="margin-top: 0.5rem;">${this.formatMessage(context.image_analysis)}</div>
+                </div>
+            `;
         }
         
         messageDiv.innerHTML = `
@@ -254,6 +422,7 @@ class EmpathyChatBot {
             <div class="message-content">
                 <div class="message-text">${this.formatMessage(content)}</div>
                 ${emotionInfo}
+                ${imageAnalysisInfo}
                 <div class="message-time">${timestamp}</div>
             </div>
         `;
@@ -263,8 +432,10 @@ class EmpathyChatBot {
     }
     
     formatMessage(message) {
-        // Basic message formatting (can be extended)
-        return message.replace(/\n/g, '<br>');
+        return message
+            .replace(/\n/g, '<br>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*?)\*/g, '<em>$1</em>');
     }
     
     formatTimestamp(date) {
@@ -275,32 +446,30 @@ class EmpathyChatBot {
     }
     
     showTypingIndicator() {
-        const typingIndicator = document.getElementById('typingIndicator');
-        typingIndicator.style.display = 'flex';
+        const indicator = document.getElementById('typingIndicator');
+        indicator.style.display = 'flex';
     }
     
     hideTypingIndicator() {
-        const typingIndicator = document.getElementById('typingIndicator');
-        typingIndicator.style.display = 'none';
+        const indicator = document.getElementById('typingIndicator');
+        indicator.style.display = 'none';
     }
     
     toggleVideoStream() {
-        const toggleButton = document.getElementById('toggleCamera');
+        const toggleBtn = document.getElementById('toggleCamera');
         
         if (this.isVideoActive) {
-            // Stop video stream
             const stream = this.videoElement.srcObject;
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
             this.videoElement.srcObject = null;
             this.isVideoActive = false;
-            toggleButton.innerHTML = '<span class="camera-icon">📷</span>';
+            toggleBtn.innerHTML = '<i class="fas fa-video-slash"></i>';
             this.showStatusMessage('Camera deactivated', 'info');
         } else {
-            // Restart video stream
             this.setupVideoStream();
-            toggleButton.innerHTML = '<span class="camera-icon">⏸️</span>';
+            toggleBtn.innerHTML = '<i class="fas fa-video"></i>';
         }
     }
     
@@ -317,14 +486,67 @@ class EmpathyChatBot {
         }
     }
     
+    updateGeminiStatus() {
+        const geminiStatus = document.getElementById('geminiStatus');
+        const geminiText = document.getElementById('geminiText');
+        
+        if (this.geminiAvailable) {
+            geminiStatus.style.borderColor = 'var(--success)';
+            geminiStatus.style.background = 'rgba(16, 185, 129, 0.1)';
+            geminiText.textContent = 'Gemini Active';
+        } else {
+            geminiStatus.style.borderColor = 'var(--warning)';
+            geminiStatus.style.background = 'rgba(234, 179, 8, 0.1)';
+            geminiText.textContent = 'Gemini Offline';
+        }
+    }
+    
     showStatusMessage(message, type = 'info') {
-        // Create status message (could be implemented as toast notifications)
         console.log(`[${type.toUpperCase()}] ${message}`);
         
-        // Optionally show as temporary UI element
-        if (type === 'error') {
-            // Could implement error toast here
-        }
+        // Create toast notification
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.style.cssText = `
+            position: fixed;
+            top: 100px;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 10px;
+            color: white;
+            font-size: 0.875rem;
+            font-weight: 500;
+            z-index: 2000;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+            max-width: 300px;
+        `;
+        
+        const colors = {
+            success: 'var(--success)',
+            error: 'var(--error)',
+            warning: 'var(--warning)',
+            info: 'var(--primary)'
+        };
+        
+        toast.style.background = colors[type] || colors.info;
+        toast.textContent = message;
+        
+        document.body.appendChild(toast);
+        
+        // Animate in
+        setTimeout(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(0)';
+        }, 100);
+        
+        // Remove after delay
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(100%)';
+            setTimeout(() => document.body.removeChild(toast), 300);
+        }, 3000);
     }
     
     showCameraError() {
@@ -332,41 +554,74 @@ class EmpathyChatBot {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'camera-error';
         errorDiv.innerHTML = `
-            <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">📷</div>
+            <div style="
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                color: var(--text-muted);
+                z-index: 10;
+            ">
+                <i class="fas fa-video-slash" style="font-size: 3rem; margin-bottom: 1rem;"></i>
                 <h4>Camera Access Required</h4>
-                <p>Please allow camera access to enable emotion detection.</p>
+                <p style="margin: 0.5rem 0;">Please allow camera access to enable emotion detection</p>
                 <button onclick="location.reload()" style="
-                    background: var(--accent-primary);
+                    background: var(--primary);
                     color: white;
                     border: none;
-                    padding: 0.5rem 1rem;
-                    border-radius: var(--radius-md);
+                    padding: 0.75rem 1.5rem;
+                    border-radius: 25px;
                     cursor: pointer;
                     margin-top: 1rem;
-                ">Retry</button>
+                    font-weight: 600;
+                ">
+                    <i class="fas fa-redo"></i> Try Again
+                </button>
             </div>
         `;
         
         videoContainer.appendChild(errorDiv);
     }
     
-    adjustInputHeight(textarea) {
+    adjustTextareaHeight(textarea) {
         textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        const newHeight = Math.min(textarea.scrollHeight, 120);
+        textarea.style.height = newHeight + 'px';
     }
 }
 
-// Initialize the application when DOM is loaded
+// Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new EmpathyChatBot();
+    console.log('🚀 Initializing Enhanced Empathetic AI...');
+    new EnhancedEmpathyBot();
 });
 
-// Handle page visibility changes to pause/resume video processing
+// Handle page visibility for performance
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        console.log('Page hidden - pausing video processing');
+        console.log('📱 Page hidden - optimizing performance');
     } else {
-        console.log('Page visible - resuming video processing');
+        console.log('📱 Page visible - resuming full operation');
+    }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    // Ctrl/Cmd + Enter to send message
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        const messageInput = document.getElementById('messageInput');
+        if (document.activeElement === messageInput) {
+            e.preventDefault();
+            document.getElementById('sendBtn').click();
+        }
+    }
+    
+    // Escape to clear image preview
+    if (e.key === 'Escape') {
+        const previewContainer = document.getElementById('imagePreview');
+        if (previewContainer.style.display !== 'none') {
+            document.getElementById('clearBtn').click();
+        }
     }
 });

@@ -3,10 +3,700 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Empathetic AI Assistant</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>🧠 Enhanced Empathetic AI Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #10b981;
+            --primary-dark: #059669;
+            --secondary: #d946ef;
+            --accent: #8b5cf6;
+            --success: #22c55e;
+            --warning: #eab308;
+            --error: #ef4444;
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-secondary: #262626;
+            --text-primary: #ffffff;
+            --text-secondary: #d1d5db;
+            --text-muted: #6b7280;
+            --border: #374151;
+            --shadow: 0 10px 25px rgba(0,0,0,0.4);
+            --gradient-primary: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            --gradient-accent: linear-gradient(135deg, var(--accent) 0%, var(--secondary) 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+
+        .app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header Styles */
+        .header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem 2rem;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo-icon {
+            font-size: 2.5rem;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 20px rgba(16, 185, 129, 0.5));
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+
+        .logo h1 {
+            font-size: 1.75rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-section {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 25px;
+            border: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--error);
+            transition: all 0.3s ease;
+            animation: blink 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 15px var(--success);
+            animation: none;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        .gemini-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 450px 1fr;
+            gap: 2rem;
+            padding: 2rem;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Left Panel */
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .video-section, .multimodal-section {
+            background: var(--bg-card);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .section-header h3 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .video-container {
+            position: relative;
+            aspect-ratio: 4/3;
+            background: var(--bg-secondary);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 30px rgba(16, 185, 129, 0.3);
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .control-btn {
+            width: 45px;
+            height: 45px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-btn:hover {
+            background: var(--primary);
+            transform: scale(1.1);
+        }
+
+        .emotion-display {
+            background: var(--bg-secondary);
+            border-radius: 15px;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .emotion-indicator {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .emotion-emoji {
+            font-size: 4rem;
+            filter: drop-shadow(0 0 25px var(--accent));
+            transition: all 0.5s ease;
+        }
+
+        .emotion-details {
+            flex: 1;
+        }
+
+        .emotion-label {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.75rem;
+            text-transform: capitalize;
+        }
+
+        .confidence-container {
+            margin-bottom: 1rem;
+        }
+
+        .confidence-bar {
+            width: 100%;
+            height: 10px;
+            background: var(--bg-dark);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: var(--gradient-accent);
+            transition: width 0.3s ease;
+            border-radius: 5px;
+        }
+
+        .confidence-text {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .face-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            background: var(--bg-dark);
+            border-radius: 10px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+        }
+
+        .face-status.detected {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        /* Multimodal Section */
+        .multimodal-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .upload-area.dragover {
+            border-color: var(--accent);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 2rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 10px;
+            margin: 1rem 0;
+        }
+
+        /* Right Panel - Chat */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-container {
+            background: var(--bg-card);
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 2rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-secondary);
+            border-radius: 20px 20px 0 0;
+        }
+
+        .chat-header h3 {
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .chat-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem;
+            min-height: 400px;
+            max-height: calc(100vh - 400px);
+        }
+
+        .message {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .user-message .message-avatar {
+            background: var(--gradient-primary);
+        }
+
+        .assistant-message .message-avatar {
+            background: var(--gradient-accent);
+        }
+
+        .message-content {
+            flex: 1;
+            max-width: calc(100% - 56px);
+        }
+
+        .message-text {
+            padding: 1.25rem 1.5rem;
+            border-radius: 20px;
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+            line-height: 1.6;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .user-message .message-text {
+            background: var(--gradient-primary);
+            color: white;
+            margin-left: auto;
+        }
+
+        .assistant-message .message-text {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .message-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            padding-left: 1.5rem;
+        }
+
+        .image-analysis {
+            background: rgba(139, 92, 246, 0.1);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        /* Chat Input */
+        .chat-input-container {
+            padding: 2rem;
+            border-top: 1px solid var(--border);
+            background: var(--bg-secondary);
+        }
+
+        .emotion-context {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .context-emotion {
+            color: var(--primary);
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+
+        #messageInput {
+            flex: 1;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 15px;
+            padding: 1rem 1.5rem;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+            resize: none;
+            font-family: inherit;
+            max-height: 120px;
+            min-height: 50px;
+        }
+
+        #messageInput:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        #messageInput::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .send-btn, .image-btn {
+            width: 50px;
+            height: 50px;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 1.25rem;
+        }
+
+        .send-btn {
+            background: var(--gradient-primary);
+            color: white;
+        }
+
+        .image-btn {
+            background: var(--gradient-accent);
+            color: white;
+        }
+
+        .send-btn:hover, .image-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin-top: 1rem;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 80%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            40% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* Scrollbar Styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 4px;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 400px 1fr;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .left-panel {
+                order: 1;
+            }
+            
+            .right-panel {
+                order: 2;
+                min-height: 500px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .video-section, .multimodal-section, .chat-container {
+                padding: 1.5rem;
+            }
+        }
+
+        /* Animation Classes */
+        .emotion-transition {
+            animation: emotionPulse 0.6s ease-in-out;
+        }
+
+        @keyframes emotionPulse {
+            0% { transform: scale(1); }
+            50% { 
+                transform: scale(1.1);
+                filter: drop-shadow(0 0 30px var(--accent));
+            }
+            100% { transform: scale(1); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* File Input Styling */
+        #imageInput {
+            display: none;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--error);
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            font-size: 0.875rem;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--primary);
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            font-size: 0.875rem;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -15,53 +705,105 @@
             <div class="header-content">
                 <div class="logo">
                     <div class="logo-icon">🧠</div>
-                    <h1>Empathetic AI</h1>
+                    <div>
+                        <h1>Enhanced Empathetic AI</h1>
+                        <div class="logo-subtitle" style="font-size: 0.8rem; color: var(--text-muted);">
+                            Emotion • Vision • Conversation
+                        </div>
+                    </div>
                 </div>
-                <div class="status-indicator">
-                    <div class="status-dot" id="connectionStatus"></div>
-                    <span class="status-text" id="statusText">Connecting...</span>
+                <div class="status-section">
+                    <div class="status-indicator">
+                        <div class="status-dot" id="connectionStatus"></div>
+                        <span class="status-text" id="statusText">Connecting...</span>
+                    </div>
+                    <div class="gemini-status" id="geminiStatus">
+                        <i class="fas fa-robot"></i>
+                        <span id="geminiText">Gemini AI</span>
+                    </div>
                 </div>
             </div>
         </header>
 
         <div class="main-content">
-            <!-- Left Panel - Video & Emotion -->
+            <!-- Left Panel -->
             <div class="left-panel">
+                <!-- Video Section -->
                 <div class="video-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-video"></i> Live Emotion Detection</h3>
+                        <div class="privacy-note" style="font-size: 0.75rem; color: var(--text-muted);">
+                            🔒 Processing locally
+                        </div>
+                    </div>
+                    
                     <div class="video-container">
                         <video id="videoElement" autoplay muted playsinline></video>
                         <canvas id="canvasElement" style="display: none;"></canvas>
                         <div class="video-overlay">
-                            <div class="camera-controls">
-                                <button id="toggleCamera" class="control-btn">
-                                    <span class="camera-icon">📷</span>
-                                </button>
-                            </div>
+                            <button id="toggleCamera" class="control-btn" title="Toggle Camera">
+                                <i class="fas fa-video"></i>
+                            </button>
                         </div>
                     </div>
                     
                     <div class="emotion-display">
-                        <div class="emotion-header">
-                            <h3>Emotion Detection</h3>
-                            <div class="privacy-note">🔒 Processing locally</div>
-                        </div>
-                        
-                        <div class="emotion-content" id="emotionContent">
-                            <div class="emotion-indicator">
-                                <div class="emotion-emoji" id="emotionEmoji">😐</div>
-                                <div class="emotion-details">
-                                    <div class="emotion-label" id="emotionLabel">Neutral</div>
+                        <div class="emotion-indicator">
+                            <div class="emotion-emoji" id="emotionEmoji">😐</div>
+                            <div class="emotion-details">
+                                <div class="emotion-label" id="emotionLabel">Neutral</div>
+                                <div class="confidence-container">
                                     <div class="confidence-bar">
                                         <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
                                     </div>
-                                    <div class="confidence-text" id="confidenceText">0%</div>
+                                    <div class="confidence-text" id="confidenceText">0% confidence</div>
                                 </div>
                             </div>
-                            
-                            <div class="face-status" id="faceStatus">
-                                <span class="status-icon">👤</span>
-                                <span>Looking for face...</span>
+                        </div>
+                        
+                        <div class="face-status" id="faceStatus">
+                            <i class="fas fa-search"></i>
+                            <span>Looking for face...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Multimodal Section -->
+                <div class="multimodal-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-images"></i> Vision Analysis</h3>
+                    </div>
+                    
+                    <div class="multimodal-controls">
+                        <div class="upload-area" id="imageUploadArea">
+                            <div class="upload-icon">
+                                <i class="fas fa-image"></i>
                             </div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                Click or drag image here
+                            </div>
+                            <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                        </div>
+                        
+                        <div class="upload-area" id="quickCapture" style="cursor: pointer;">
+                            <div class="upload-icon">
+                                <i class="fas fa-camera"></i>
+                            </div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                Quick Capture
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="imagePreview" style="display: none;">
+                        <img id="previewImage" class="preview-image" alt="Preview">
+                        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                            <button id="analyzeBtn" class="control-btn" style="width: auto; padding: 0.5rem 1rem; border-radius: 8px;">
+                                <i class="fas fa-search-plus"></i> Analyze
+                            </button>
+                            <button id="clearBtn" class="control-btn" style="width: auto; padding: 0.5rem 1rem; border-radius: 8px; background: var(--error);">
+                                <i class="fas fa-trash"></i> Clear
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -71,16 +813,18 @@
             <div class="right-panel">
                 <div class="chat-container">
                     <div class="chat-header">
-                        <h3>Empathetic Conversation</h3>
-                        <div class="chat-subtitle">AI that understands your emotions</div>
+                        <h3><i class="fas fa-comments"></i> Empathetic Conversation</h3>
+                        <div class="chat-subtitle">AI that understands your emotions and images</div>
                     </div>
                     
                     <div class="chat-messages" id="chatMessages">
-                        <div class="message assistant-message">
-                            <div class="message-avatar">🤖</div>
+                        <div class="message assistant-message fade-in">
+                            <div class="message-avatar">
+                                <i class="fas fa-robot"></i>
+                            </div>
                             <div class="message-content">
                                 <div class="message-text">
-                                    Hello! I'm your empathetic AI assistant. I can see your emotions through your camera and respond accordingly. How are you feeling today?
+                                    Hello! I'm your enhanced empathetic AI assistant. I can understand your emotions through your camera, analyze images you share, and have meaningful conversations with you. How are you feeling today?
                                 </div>
                                 <div class="message-time">Just now</div>
                             </div>
@@ -89,29 +833,33 @@
                     
                     <div class="chat-input-container">
                         <div class="emotion-context" id="emotionContext" style="display: none;">
+                            <i class="fas fa-heart"></i>
                             <span class="context-label">Current mood:</span>
                             <span class="context-emotion" id="contextEmotion">neutral</span>
                         </div>
                         
                         <div class="chat-input-wrapper">
-                            <input 
-                                type="text" 
+                            <textarea 
                                 id="messageInput" 
-                                placeholder="Share your thoughts..." 
-                                maxlength="500"
-                            >
-                            <button id="sendButton" class="send-btn">
-                                <span class="send-icon">→</span>
-                            </button>
+                                placeholder="Share your thoughts or ask about an image..." 
+                                rows="1"
+                                maxlength="1000"
+                            ></textarea>
+                            <div class="input-actions">
+                                <button id="imageBtn" class="image-btn" title="Upload Image">
+                                    <i class="fas fa-image"></i>
+                                </button>
+                                <button id="sendBtn" class="send-btn" title="Send Message">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
                         </div>
                         
-                        <div class="input-footer">
-                            <div class="typing-indicator" id="typingIndicator" style="display: none;">
-                                <span class="typing-dot"></span>
-                                <span class="typing-dot"></span>
-                                <span class="typing-dot"></span>
-                                <span class="typing-text">AI is thinking...</span>
-                            </div>
+                        <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                            <span style="margin-left: 0.5rem;">AI is thinking...</span>
                         </div>
                     </div>
                 </div>
