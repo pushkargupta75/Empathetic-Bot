@@ -18,6 +18,11 @@ from tensorflow.keras.preprocessing.image import img_to_array
 from sklearn.preprocessing import LabelEncoder
 import requests
 import warnings
+from dotenv import load_dotenv  # Add this import
+
+# Load environment variables from .env file
+load_dotenv()  # Add this line
+
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
@@ -26,13 +31,23 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # Configure Gemini API
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+print(f"🔍 Checking for API key... {'Found' if GEMINI_API_KEY else 'Not found'}")  # Debug line
+
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-    print("✅ Gemini API configured successfully")
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+        print("✅ Gemini API configured successfully")
+        print(f"🔑 Using API key: {GEMINI_API_KEY[:10]}...{GEMINI_API_KEY[-4:] if len(GEMINI_API_KEY) > 14 else 'short_key'}")  # Debug (safe partial display)
+    except Exception as e:
+        print(f"❌ Error configuring Gemini API: {e}")
+        gemini_model = None
 else:
     print("⚠️ Warning: GEMINI_API_KEY not found in environment variables")
+    print("💡 Make sure to set your API key in a .env file or environment variable")
     gemini_model = None
+
+# Rest of your code remains the same...
 
 # Global variables
 emotion_detector = None
