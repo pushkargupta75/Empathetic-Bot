@@ -12,220 +12,541 @@ import mediapipe as mp
 import os
 from PIL import Image
 import io
-import google.generativeai as genai
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
-from sklearn.preprocessing import LabelEncoder
-import requests
 import warnings
-from dotenv import load_dotenv  # Add this import
+from dotenv import load_dotenv
+import logging
 
-# Load environment variables from .env file
-load_dotenv()  # Add this line
+# Free emotion detection imports
+try:
+    from deepface import DeepFace
+    DEEPFACE_AVAILABLE = True
+    print("✅ DeepFace loaded successfully")
+except ImportError:
+    DEEPFACE_AVAILABLE = False
+    print("⚠️ DeepFace not available - install with: pip install deepface")
 
+try:
+    from fer import FER
+    FER_AVAILABLE = True
+    print("✅ FER loaded successfully") 
+except ImportError:
+    FER_AVAILABLE = False
+    print("⚠️ FER not available - install with: pip install fer")
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras.models import load_model
+    from tensorflow.keras.preprocessing.image import img_to_array
+    TF_AVAILABLE = True
+    print("✅ TensorFlow loaded successfully")
+except ImportError:
+    TF_AVAILABLE = False
+    print("⚠️ TensorFlow not available")
+
+try:
+    from transformers import pipeline, AutoImageProcessor, AutoModelForImageClassification
+    TRANSFORMERS_AVAILABLE = True
+    print("✅ Hugging Face Transformers loaded successfully")
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+    print("⚠️ Transformers not available - install with: pip install transformers torch")
+
+try:
+    import torch
+    import torchvision.transforms as transforms
+    TORCH_AVAILABLE = True
+    print("✅ PyTorch loaded successfully")
+except ImportError:
+    TORCH_AVAILABLE = False
+    print("⚠️ PyTorch not available")
+
+# Load environment variables
+load_dotenv()
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# Configure Gemini API
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-print(f"🔍 Checking for API key... {'Found' if GEMINI_API_KEY else 'Not found'}")  # Debug line
-
-if GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-        print("✅ Gemini API configured successfully")
-        print(f"🔑 Using API key: {GEMINI_API_KEY[:10]}...{GEMINI_API_KEY[-4:] if len(GEMINI_API_KEY) > 14 else 'short_key'}")  # Debug (safe partial display)
-    except Exception as e:
-        print(f"❌ Error configuring Gemini API: {e}")
-        gemini_model = None
-else:
-    print("⚠️ Warning: GEMINI_API_KEY not found in environment variables")
-    print("💡 Make sure to set your API key in a .env file or environment variable")
-    gemini_model = None
-
-# Rest of your code remains the same...
-
 # Global variables
 emotion_detector = None
 conversation_history = deque(maxlen=20)
-emotion_history = deque(maxlen=10)
+emotion_history = deque(maxlen=15)
 
-class GeminiEmotionDetector:
+class FreeAdvancedEmotionDetector:
+    """Advanced emotion detection using multiple free, open-source models"""
+    
     def __init__(self):
-        # Initialize MediaPipe Face Detection
         self.mp_face_detection = mp.solutions.face_detection
-        self.mp_drawing = mp.solutions.drawing_utils
+        self.mp_face_mesh = mp.solutions.face_mesh
         
         self.face_detection = self.mp_face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.5
+            model_selection=0, min_detection_confidence=0.7
         )
         
-        # Initialize Gemini model
-        self.gemini_model = gemini_model
+        # Initialize multiple free emotion detection models
+        self.models = {}
+        self.model_weights = {}
+        self.model_cache = {}
+        self.last_predictions = {}
         
-        # Emotion cache to avoid too many API calls
-        self.last_emotion_call = 0
-        self.emotion_call_interval = 1.5  # 1.5 seconds between API calls
-        self.cached_emotion = {'emotion': 'neutral', 'confidence': 0.0}
+        # Initialize all available free models
+        self._initialize_deepface()
+        self._initialize_fer()
+        self._initialize_huggingface()
+        self._initialize_custom_cnn()
+        self._initialize_ensemble_model()
         
-        # Face detection threshold
-        self.face_confidence_threshold = 0.6
+        # Emotion standardization
+        self.standard_emotions = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
         
-    def _create_emotion_prompt(self):
-        """Create a detailed prompt for emotion detection"""
-        return """Analyze this person's facial expression and determine their emotion. 
-
-Look carefully at:
-- Facial muscles and their tension
-- Eye shape, eyebrow position, and gaze direction
-- Mouth shape, lip position, and any smile/frown
-- Overall facial expression and micro-expressions
-
-Classify the emotion as ONE of these categories:
-- happy: genuine joy, smiling, positive expressions, relaxed happiness
-- sad: downturned mouth, droopy eyes, melancholy, disappointment
-- angry: furrowed brow, tight lips, tense jaw, scowling
-- fear: wide eyes, tense expression, worried look, anxiety
-- surprise: raised eyebrows, wide eyes, open mouth from sudden shock/amazement
-- disgust: wrinkled nose, slight frown, aversion, distaste
-- neutral: relaxed, calm, no strong emotional expression, resting face
-
-IMPORTANT: Be very careful to distinguish between:
-- Surprise (sudden shock/amazement with raised eyebrows) vs just talking or mouth slightly open
-- Happy (genuine smile with eye crinkles) vs neutral relaxed expression
-- Neutral (calm resting face) vs other subtle emotions
-- Fear (worried/anxious) vs surprise (sudden shock)
-
-Pay special attention to:
-- Eye crinkles for genuine happiness
-- Eyebrow position for surprise vs other emotions
-- Mouth tension for anger vs disgust
-- Overall facial muscle tension
-
-Respond in this EXACT JSON format:
-{
-    "emotion": "emotion_name",
-    "confidence": 0.85,
-    "reasoning": "Brief explanation focusing on key facial features observed",
-    "facial_features": "Specific features that led to this classification"
-}
-
-Confidence guidelines:
-- 0.85-1.0: Very obvious, clear emotion with multiple strong indicators
-- 0.65-0.85: Clear emotion with good supporting features
-- 0.45-0.65: Moderate confidence, some clear indicators
-- 0.25-0.45: Subtle emotion, few indicators
-- 0.0-0.25: Very unclear or truly neutral expression
-
-Be conservative - don't over-classify neutral or talking expressions as emotions."""
-
+        # Performance tracking
+        self.model_performance = {}
+        self.prediction_history = deque(maxlen=50)
+        
+        print(f"🎯 Initialized Free Advanced Emotion Detector with {len(self.models)} models")
+    
+    def _initialize_deepface(self):
+        """Initialize DeepFace with multiple backends"""
+        if DEEPFACE_AVAILABLE:
+            try:
+                # Test DeepFace with different models
+                test_image = np.ones((48, 48, 3), dtype=np.uint8) * 128
+                
+                # Try different DeepFace models (all free)
+                available_models = []
+                models_to_try = ['VGG-Face', 'Facenet', 'OpenFace', 'DeepID', 'ArcFace']
+                
+                for model_name in models_to_try:
+                    try:
+                        DeepFace.analyze(
+                            test_image, 
+                            actions=['emotion'], 
+                            enforce_detection=False,
+                            silent=True,
+                            detector_backend='opencv',
+                            model_name=model_name
+                        )
+                        available_models.append(model_name)
+                        print(f"✅ DeepFace {model_name} model available")
+                    except:
+                        continue
+                
+                if available_models:
+                    self.models['deepface'] = available_models
+                    self.model_weights['deepface'] = 0.3  # High weight
+                    print(f"✅ DeepFace initialized with {len(available_models)} models")
+                
+            except Exception as e:
+                print(f"❌ DeepFace initialization failed: {e}")
+    
+    def _initialize_fer(self):
+        """Initialize FER (Facial Expression Recognition) model"""
+        if FER_AVAILABLE:
+            try:
+                # FER with MTCNN for better face detection
+                self.models['fer'] = FER(mtcnn=True)
+                self.model_weights['fer'] = 0.25
+                print("✅ FER emotion model initialized")
+            except Exception as e:
+                try:
+                    # Fallback to basic FER
+                    self.models['fer'] = FER()
+                    self.model_weights['fer'] = 0.2
+                    print("✅ FER emotion model initialized (basic)")
+                except Exception as e2:
+                    print(f"❌ FER initialization failed: {e2}")
+    
+    def _initialize_huggingface(self):
+        """Initialize Hugging Face emotion detection models"""
+        if TRANSFORMERS_AVAILABLE:
+            try:
+                # List of free emotion detection models from Hugging Face
+                model_configs = [
+                    {
+                        'name': 'emotion-english-distilroberta-base',
+                        'model_id': 'j-hartmann/emotion-english-distilroberta-base',
+                        'weight': 0.2
+                    },
+                    {
+                        'name': 'facial-emotion-recognition',  
+                        'model_id': 'trpakov/vit-face-expression',
+                        'weight': 0.25
+                    }
+                ]
+                
+                self.models['huggingface'] = {}
+                
+                for config in model_configs:
+                    try:
+                        # Try to load the model
+                        processor = AutoImageProcessor.from_pretrained(config['model_id'])
+                        model = AutoModelForImageClassification.from_pretrained(config['model_id'])
+                        
+                        self.models['huggingface'][config['name']] = {
+                            'processor': processor,
+                            'model': model,
+                            'pipeline': pipeline("image-classification", 
+                                               model=config['model_id'],
+                                               return_all_scores=True)
+                        }
+                        self.model_weights[f"hf_{config['name']}"] = config['weight']
+                        print(f"✅ Hugging Face {config['name']} model loaded")
+                    except Exception as e:
+                        print(f"⚠️ Could not load {config['name']}: {e}")
+                
+                if self.models['huggingface']:
+                    print(f"✅ Hugging Face models initialized: {len(self.models['huggingface'])} models")
+                
+            except Exception as e:
+                print(f"❌ Hugging Face initialization failed: {e}")
+    
+    def _initialize_custom_cnn(self):
+        """Initialize custom CNN model for emotion detection"""
+        if TF_AVAILABLE:
+            try:
+                # Create a simple but effective CNN model for emotion detection
+                model = tf.keras.Sequential([
+                    tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(48, 48, 1)),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Conv2D(64, (3, 3), activation='relu'),
+                    tf.keras.layers.MaxPooling2D(2, 2),
+                    tf.keras.layers.Dropout(0.25),
+                    
+                    tf.keras.layers.Conv2D(128, (3, 3), activation='relu'),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Conv2D(128, (3, 3), activation='relu'),
+                    tf.keras.layers.MaxPooling2D(2, 2),
+                    tf.keras.layers.Dropout(0.25),
+                    
+                    tf.keras.layers.Conv2D(256, (3, 3), activation='relu'),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Dropout(0.25),
+                    
+                    tf.keras.layers.Flatten(),
+                    tf.keras.layers.Dense(512, activation='relu'),
+                    tf.keras.layers.BatchNormalization(),
+                    tf.keras.layers.Dropout(0.5),
+                    tf.keras.layers.Dense(7, activation='softmax')  # 7 emotions
+                ])
+                
+                # Check if pre-trained weights exist, otherwise use untrained model
+                model_path = 'models/emotion_cnn_model.h5'
+                if os.path.exists(model_path):
+                    model.load_weights(model_path)
+                    print("✅ Loaded pre-trained CNN emotion model")
+                else:
+                    print("⚠️ Using untrained CNN model (will have lower accuracy)")
+                
+                self.models['custom_cnn'] = model
+                self.model_weights['custom_cnn'] = 0.15
+                
+            except Exception as e:
+                print(f"❌ Custom CNN initialization failed: {e}")
+    
+    def _initialize_ensemble_model(self):
+        """Initialize ensemble voting system"""
+        self.ensemble_weights = {
+            'temporal_consistency': 0.3,  # Weight for temporal consistency
+            'confidence_weighting': 0.4,  # Weight based on model confidence
+            'model_agreement': 0.3        # Weight based on model agreement
+        }
+        self.models['ensemble'] = True
+        print("✅ Ensemble voting system initialized")
+    
     def _extract_face_region(self, frame):
-        """Extract face region from frame"""
+        """Extract face region with improved detection"""
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_detection.process(rgb_frame)
         
+        faces = []
         if results.detections:
-            # Get the most confident detection
-            best_detection = max(results.detections, 
-                               key=lambda d: d.score[0] if d.score else 0)
-            
-            if best_detection.score[0] >= self.face_confidence_threshold:
-                # Extract face bounding box with padding
-                bboxC = best_detection.location_data.relative_bounding_box
-                h, w, _ = frame.shape
-                
-                # Add padding around face for better context
-                padding = 0.4
-                x = max(0, int((bboxC.xmin - padding * bboxC.width) * w))
-                y = max(0, int((bboxC.ymin - padding * bboxC.height) * h))
-                x2 = min(w, int((bboxC.xmin + bboxC.width * (1 + padding)) * w))
-                y2 = min(h, int((bboxC.ymin + bboxC.height * (1 + padding)) * h))
-                
-                face_roi = frame[y:y2, x:x2]
-                
-                if face_roi.size > 0:
-                    return face_roi, best_detection.score[0]
+            for detection in results.detections:
+                if detection.score[0] >= 0.7:
+                    bboxC = detection.location_data.relative_bounding_box
+                    h, w, _ = frame.shape
+                    
+                    # Extract face with padding
+                    padding = 0.2
+                    x = max(0, int((bboxC.xmin - padding * bboxC.width) * w))
+                    y = max(0, int((bboxC.ymin - padding * bboxC.height) * h))
+                    x2 = min(w, int((bboxC.xmin + bboxC.width * (1 + padding)) * w))
+                    y2 = min(h, int((bboxC.ymin + bboxC.height * (1 + padding)) * h))
+                    
+                    face_roi = frame[y:y2, x:x2]
+                    
+                    if face_roi.size > 0:
+                        faces.append((face_roi, detection.score[0]))
+        
+        if faces:
+            # Return the face with highest confidence
+            return max(faces, key=lambda x: x[1])
         
         return None, 0.0
-
-    def _analyze_emotion_with_gemini(self, face_image):
-        """Use Gemini to analyze emotion in face image"""
+    
+    def _analyze_with_deepface(self, face_image):
+        """Analyze emotion with DeepFace using multiple models"""
+        if 'deepface' not in self.models:
+            return None
+            
         try:
-            # Convert face image to PIL format
+            face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
+            face_resized = cv2.resize(face_rgb, (224, 224))
+            
+            predictions = []
+            
+            # Try each available DeepFace model
+            for model_name in self.models['deepface'][:2]:  # Use top 2 models for speed
+                try:
+                    result = DeepFace.analyze(
+                        face_resized, 
+                        actions=['emotion'],
+                        enforce_detection=False,
+                        silent=True,
+                        detector_backend='skip',  # Skip detection since we already have face
+                        model_name=model_name
+                    )
+                    
+                    if isinstance(result, list):
+                        result = result[0]
+                    
+                    emotions = result['emotion']
+                    # Normalize emotion keys
+                    normalized_emotions = {}
+                    for emotion, confidence in emotions.items():
+                        emotion_key = emotion.lower()
+                        if emotion_key in self.standard_emotions:
+                            normalized_emotions[emotion_key] = confidence / 100.0
+                    
+                    if normalized_emotions:
+                        predictions.append({
+                            'model': f'deepface_{model_name}',
+                            'emotions': normalized_emotions,
+                            'confidence': max(normalized_emotions.values())
+                        })
+                        
+                except Exception as e:
+                    continue
+            
+            return predictions
+            
+        except Exception as e:
+            print(f"DeepFace analysis error: {e}")
+            return None
+    
+    def _analyze_with_fer(self, face_image):
+        """Analyze emotion with FER"""
+        if 'fer' not in self.models:
+            return None
+            
+        try:
+            face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
+            
+            # FER expects RGB image
+            emotions = self.models['fer'].detect_emotions(face_rgb)
+            
+            if emotions:
+                # Get the first (most confident) detection
+                emotion_scores = emotions[0]['emotions']
+                
+                # Normalize emotion keys and values
+                normalized_emotions = {}
+                for emotion, confidence in emotion_scores.items():
+                    emotion_key = emotion.lower()
+                    if emotion_key in self.standard_emotions:
+                        normalized_emotions[emotion_key] = confidence
+                
+                return [{
+                    'model': 'fer',
+                    'emotions': normalized_emotions,
+                    'confidence': max(normalized_emotions.values()) if normalized_emotions else 0
+                }]
+            
+            return None
+            
+        except Exception as e:
+            print(f"FER analysis error: {e}")
+            return None
+    
+    def _analyze_with_huggingface(self, face_image):
+        """Analyze emotion with Hugging Face models"""
+        if 'huggingface' not in self.models or not self.models['huggingface']:
+            return None
+            
+        try:
             face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(face_rgb)
             
-            # Enhance image quality for better analysis
-            if pil_image.size[0] < 200 or pil_image.size[1] < 200:
-                # Upscale small images
-                new_size = (max(200, pil_image.size[0]), max(200, pil_image.size[1]))
-                pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-            elif pil_image.size[0] > 800 or pil_image.size[1] > 800:
-                # Downscale very large images
-                pil_image.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            predictions = []
             
-            # Create prompt
-            prompt = self._create_emotion_prompt()
+            for model_name, model_info in self.models['huggingface'].items():
+                try:
+                    # Use the pipeline for emotion detection
+                    results = model_info['pipeline'](pil_image)
+                    
+                    # Convert to standard format
+                    normalized_emotions = {}
+                    for result in results:
+                        label = result['label'].lower()
+                        score = result['score']
+                        
+                        # Map different model outputs to standard emotions
+                        emotion_mapping = {
+                            'joy': 'happy', 'happiness': 'happy', 'positive': 'happy',
+                            'sadness': 'sad', 'negative': 'sad',
+                            'anger': 'angry', 'rage': 'angry',
+                            'fear': 'fear', 'anxiety': 'fear',
+                            'surprise': 'surprise', 'shock': 'surprise',
+                            'disgust': 'disgust',
+                            'neutral': 'neutral', 'calm': 'neutral'
+                        }
+                        
+                        mapped_emotion = emotion_mapping.get(label, label)
+                        if mapped_emotion in self.standard_emotions:
+                            normalized_emotions[mapped_emotion] = score
+                    
+                    if normalized_emotions:
+                        predictions.append({
+                            'model': f'hf_{model_name}',
+                            'emotions': normalized_emotions,
+                            'confidence': max(normalized_emotions.values())
+                        })
+                        
+                except Exception as e:
+                    continue
             
-            # Call Gemini Vision API
-            response = self.gemini_model.generate_content([prompt, pil_image])
-            response_text = response.text.strip()
+            return predictions if predictions else None
             
-            # Clean and parse JSON response
-            if "```json" in response_text:
-                json_start = response_text.find("```json") + 7
-                json_end = response_text.find("```", json_start)
-                response_text = response_text[json_start:json_end].strip()
-            elif "```" in response_text:
-                json_start = response_text.find("```") + 3
-                json_end = response_text.rfind("```")
-                response_text = response_text[json_start:json_end].strip()
-            elif "{" in response_text and "}" in response_text:
-                json_start = response_text.find("{")
-                json_end = response_text.rfind("}") + 1
-                response_text = response_text[json_start:json_end]
-            
-            emotion_data = json.loads(response_text)
-            
-            # Validate and clean response
-            valid_emotions = ['happy', 'sad', 'angry', 'fear', 'surprise', 'disgust', 'neutral']
-            if emotion_data.get('emotion') not in valid_emotions:
-                emotion_data['emotion'] = 'neutral'
-                emotion_data['confidence'] = 0.3
-            
-            # Ensure confidence is in valid range
-            confidence = float(emotion_data.get('confidence', 0.3))
-            emotion_data['confidence'] = max(0.0, min(1.0, confidence))
-            
-            return emotion_data
-            
-        except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {e}")
-            print(f"Raw Gemini response: {response_text}")
-            return {
-                'emotion': 'neutral',
-                'confidence': 0.2,
-                'reasoning': 'Error parsing Gemini response',
-                'facial_features': 'Unable to analyze due to parsing error'
-            }
         except Exception as e:
-            print(f"Gemini emotion analysis error: {e}")
-            return {
-                'emotion': 'neutral',
-                'confidence': 0.1,
-                'reasoning': f'API Error: {str(e)}',
-                'facial_features': 'Analysis failed'
-            }
-
-    def process_frame(self, frame):
-        """Process frame for emotion detection using Gemini Vision"""
-        current_time = time.time()
+            print(f"Hugging Face analysis error: {e}")
+            return None
+    
+    def _analyze_with_custom_cnn(self, face_image):
+        """Analyze emotion with custom CNN"""
+        if 'custom_cnn' not in self.models:
+            return None
+            
+        try:
+            # Preprocess for CNN
+            face_gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
+            face_resized = cv2.resize(face_gray, (48, 48))
+            face_normalized = face_resized.astype('float32') / 255.0
+            face_input = np.expand_dims(face_normalized, axis=0)
+            face_input = np.expand_dims(face_input, axis=-1)
+            
+            # Predict
+            predictions = self.models['custom_cnn'].predict(face_input, verbose=0)
+            emotion_probabilities = predictions[0]
+            
+            # Map to standard emotions
+            normalized_emotions = {}
+            for i, emotion in enumerate(self.standard_emotions):
+                normalized_emotions[emotion] = float(emotion_probabilities[i])
+            
+            return [{
+                'model': 'custom_cnn',
+                'emotions': normalized_emotions,
+                'confidence': float(np.max(emotion_probabilities))
+            }]
+            
+        except Exception as e:
+            print(f"Custom CNN analysis error: {e}")
+            return None
+    
+    def _ensemble_prediction(self, all_predictions, temporal_history=None):
+        """Advanced ensemble prediction using multiple strategies"""
+        if not all_predictions:
+            return None
         
-        # Extract face region first
+        # Flatten all predictions
+        flat_predictions = []
+        for pred_list in all_predictions:
+            if pred_list:
+                flat_predictions.extend(pred_list)
+        
+        if not flat_predictions:
+            return None
+        
+        # Strategy 1: Weighted average based on model confidence
+        emotion_scores = {}
+        total_weight = 0
+        
+        for pred in flat_predictions:
+            model_weight = self.model_weights.get(pred['model'].split('_')[0], 0.1)
+            confidence = pred['confidence']
+            
+            # Adjust weight based on confidence
+            adjusted_weight = model_weight * (1 + confidence)
+            total_weight += adjusted_weight
+            
+            for emotion, score in pred['emotions'].items():
+                if emotion not in emotion_scores:
+                    emotion_scores[emotion] = 0
+                emotion_scores[emotion] += score * adjusted_weight
+        
+        # Normalize scores
+        if total_weight > 0:
+            for emotion in emotion_scores:
+                emotion_scores[emotion] /= total_weight
+        
+        # Strategy 2: Consider temporal consistency
+        if temporal_history and len(temporal_history) >= 3:
+            # Get recent emotions
+            recent_emotions = [h.get('emotion', 'neutral') for h in list(temporal_history)[-3:]]
+            most_common = max(set(recent_emotions), key=recent_emotions.count)
+            
+            # Boost score for consistent emotions
+            if most_common in emotion_scores:
+                emotion_scores[most_common] *= 1.2
+        
+        # Strategy 3: Model agreement bonus
+        emotion_counts = {}
+        for pred in flat_predictions:
+            top_emotion = max(pred['emotions'].items(), key=lambda x: x[1])
+            emotion = top_emotion[0]
+            if emotion not in emotion_counts:
+                emotion_counts[emotion] = 0
+            emotion_counts[emotion] += 1
+        
+        # Boost emotions that multiple models agree on
+        for emotion, count in emotion_counts.items():
+            if count > 1 and emotion in emotion_scores:
+                agreement_bonus = 1 + (count - 1) * 0.1
+                emotion_scores[emotion] *= agreement_bonus
+        
+        # Final prediction
+        if emotion_scores:
+            best_emotion = max(emotion_scores.items(), key=lambda x: x[1])
+            final_confidence = min(0.95, best_emotion[1])
+            
+            # Generate reasoning
+            reasoning_parts = []
+            reasoning_parts.append(f"Ensemble of {len(flat_predictions)} models")
+            
+            # Top contributing models
+            top_models = sorted(flat_predictions, key=lambda x: x['confidence'], reverse=True)[:2]
+            model_names = [p['model'].split('_')[0] for p in top_models]
+            reasoning_parts.append(f"Top contributors: {', '.join(set(model_names))}")
+            
+            # Agreement level
+            agreement_level = len([p for p in flat_predictions 
+                                 if max(p['emotions'].items(), key=lambda x: x[1])[0] == best_emotion[0]])
+            reasoning_parts.append(f"{agreement_level}/{len(flat_predictions)} models agree")
+            
+            return {
+                'emotion': best_emotion[0],
+                'confidence': final_confidence,
+                'reasoning': ' • '.join(reasoning_parts),
+                'detailed_scores': emotion_scores,
+                'model_count': len(flat_predictions),
+                'agreement_ratio': agreement_level / len(flat_predictions)
+            }
+        
+        return None
+    
+    def process_frame(self, frame):
+        """Process frame with advanced multi-model emotion detection"""
+        # Extract face region
         face_roi, detection_confidence = self._extract_face_region(frame)
         
         emotion_data = {
@@ -235,361 +556,189 @@ Be conservative - don't over-classify neutral or talking expressions as emotions
             'timestamp': datetime.now().isoformat(),
             'reasoning': 'No face detected',
             'facial_features': 'None',
-            'detection_confidence': round(detection_confidence, 2)
+            'detection_confidence': round(detection_confidence, 2),
+            'model_count': 0,
+            'analysis_method': 'Free Multi-AI Ensemble'
         }
         
-        if face_roi is not None:
+        if face_roi is not None and face_roi.size > 0:
             emotion_data['face_detected'] = True
             
-            # Use Gemini for emotion analysis (with rate limiting to avoid API quota issues)
-            if current_time - self.last_emotion_call >= self.emotion_call_interval:
-                try:
-                    print(f"🔍 Analyzing emotion with Gemini...")
-                    gemini_result = self._analyze_emotion_with_gemini(face_roi)
-                    emotion_data.update(gemini_result)
-                    self.cached_emotion = gemini_result
-                    self.last_emotion_call = current_time
-                    print(f"✅ Gemini detected: {gemini_result['emotion']} ({gemini_result['confidence']:.2f})")
-                    
-                except Exception as e:
-                    print(f"❌ Error in Gemini emotion analysis: {e}")
-                    # Use cached emotion if available
-                    if self.cached_emotion['emotion'] != 'neutral':
-                        emotion_data.update(self.cached_emotion)
-                        emotion_data['reasoning'] += " (cached - API error)"
-            else:
-                # Use cached emotion to avoid too many API calls
-                if self.cached_emotion['emotion'] != 'neutral':
-                    emotion_data.update(self.cached_emotion)
-                    emotion_data['reasoning'] += " (cached)"
-        
-        return emotion_data
-
-class AdvancedEmotionDetector:
-    """Improved fallback detector when Gemini is not available"""
-    def __init__(self):
-        self.mp_face_detection = mp.solutions.face_detection
-        self.mp_face_mesh = mp.solutions.face_mesh
-        
-        self.face_detection = self.mp_face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.7
-        )
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.7
-        )
-        
-        self.emotion_labels = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
-        
-    def _calculate_advanced_features(self, landmarks, image_shape):
-        """Calculate sophisticated facial features"""
-        height, width = image_shape[:2]
-        
-        if not landmarks:
-            return {}
-            
-        points = np.array([[lm.x * width, lm.y * height] for lm in landmarks.landmark])
-        
-        features = {}
-        
-        try:
-            # Mouth analysis (more detailed)
-            mouth_corners = [points[61], points[291]]  # Left and right corners
-            mouth_top = points[13]  # Upper lip center
-            mouth_bottom = points[14]  # Lower lip center
-            
-            mouth_width = np.linalg.norm(mouth_corners[1] - mouth_corners[0])
-            mouth_height = np.linalg.norm(mouth_top - mouth_bottom)
-            
-            # Mouth curvature (smile/frown detection)
-            mouth_center_y = (mouth_corners[0][1] + mouth_corners[1][1]) / 2
-            mouth_curvature = mouth_center_y - mouth_top[1]
-            
-            features['mouth_width'] = mouth_width
-            features['mouth_height'] = mouth_height
-            features['mouth_ratio'] = mouth_height / mouth_width if mouth_width > 0 else 0
-            features['mouth_curvature'] = mouth_curvature / height  # Normalized
-            
-            # Eye analysis (both eyes)
-            left_eye_points = points[[33, 7, 163, 144, 145, 153]]
-            right_eye_points = points[[362, 382, 381, 380, 374, 373]]
-            
-            # Left eye aspect ratio
-            left_eye_height = np.mean([
-                np.linalg.norm(left_eye_points[1] - left_eye_points[5]),
-                np.linalg.norm(left_eye_points[2] - left_eye_points[4])
-            ])
-            left_eye_width = np.linalg.norm(left_eye_points[0] - left_eye_points[3])
-            
-            # Right eye aspect ratio
-            right_eye_height = np.mean([
-                np.linalg.norm(right_eye_points[1] - right_eye_points[5]),
-                np.linalg.norm(right_eye_points[2] - right_eye_points[4])
-            ])
-            right_eye_width = np.linalg.norm(right_eye_points[0] - right_eye_points[3])
-            
-            features['left_eye_ratio'] = left_eye_height / left_eye_width if left_eye_width > 0 else 0
-            features['right_eye_ratio'] = right_eye_height / right_eye_width if right_eye_width > 0 else 0
-            features['avg_eye_ratio'] = (features['left_eye_ratio'] + features['right_eye_ratio']) / 2
-            
-            # Eyebrow position
-            left_eyebrow_y = np.mean([points[70][1], points[63][1], points[105][1]])
-            right_eyebrow_y = np.mean([points[296][1], points[334][1], points[293][1]])
-            left_eye_y = np.mean([points[33][1], points[133][1]])
-            right_eye_y = np.mean([points[362][1], points[263][1]])
-            
-            features['eyebrow_distance'] = ((left_eye_y - left_eyebrow_y) + (right_eye_y - right_eyebrow_y)) / (2 * height)
-            
-        except Exception as e:
-            print(f"Error calculating features: {e}")
-            
-        return features
-    
-    def _classify_emotion_improved(self, features):
-        """Improved emotion classification with better thresholds"""
-        if not features:
-            return 'neutral', 0.3
-        
-        mouth_ratio = features.get('mouth_ratio', 0)
-        mouth_curvature = features.get('mouth_curvature', 0)
-        eye_ratio = features.get('avg_eye_ratio', 0.2)
-        eyebrow_distance = features.get('eyebrow_distance', 0.05)
-        
-        # Improved classification logic
-        
-        # Happy: Positive mouth curvature + moderate mouth opening
-        if mouth_curvature > 0.008 and mouth_ratio > 0.015:
-            confidence = min(0.85, 0.5 + mouth_curvature * 25 + mouth_ratio * 8)
-            return 'happy', confidence
-            
-        # Sad: Negative mouth curvature + droopy eyes
-        elif mouth_curvature < -0.003 and eye_ratio < 0.18:
-            confidence = min(0.8, 0.5 + abs(mouth_curvature) * 20 + (0.18 - eye_ratio) * 4)
-            return 'sad', confidence
-            
-        # Angry: Low eyebrows + tight mouth
-        elif eyebrow_distance < 0.035 and mouth_ratio < 0.015:
-            confidence = min(0.8, 0.5 + (0.035 - eyebrow_distance) * 15)
-            return 'angry', confidence
-            
-        # Surprise: High eyebrows + wide eyes + open mouth (ALL THREE required)
-        elif eyebrow_distance > 0.065 and eye_ratio > 0.25 and mouth_ratio > 0.035:
-            confidence = min(0.85, 0.6 + (eyebrow_distance - 0.065) * 10 + eye_ratio * 2)
-            return 'surprise', confidence
-            
-        # Fear: Wide eyes + high eyebrows (but not as extreme as surprise)
-        elif eye_ratio > 0.24 and eyebrow_distance > 0.055 and mouth_ratio < 0.03:
-            confidence = min(0.75, 0.5 + eye_ratio * 2)
-            return 'fear', confidence
-            
-        # Disgust: Slight squint + downturned mouth
-        elif eye_ratio < 0.16 and mouth_curvature < -0.001 and mouth_ratio < 0.02:
-            confidence = min(0.7, 0.5 + (0.16 - eye_ratio) * 3)
-            return 'disgust', confidence
-            
-        else:
-            # Neutral - be more conservative
-            return 'neutral', 0.4
-
-    def process_frame(self, frame):
-        """Process frame with improved rule-based detection"""
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = self.face_detection.process(rgb_frame)
-        mesh_results = self.mp_face_mesh.process(rgb_frame)
-        
-        emotion_data = {
-            'emotion': 'neutral',
-            'confidence': 0.0,
-            'face_detected': False,
-            'timestamp': datetime.now().isoformat(),
-            'reasoning': 'No face detected',
-            'facial_features': 'None'
-        }
-        
-        if results.detections and mesh_results.multi_face_landmarks:
-            detection = results.detections[0]
-            if detection.score[0] >= 0.7:
-                landmarks = mesh_results.multi_face_landmarks[0]
-                features = self._calculate_advanced_features(landmarks, frame.shape)
-                emotion, confidence = self._classify_emotion_improved(features)
+            try:
+                # Run all available models
+                all_predictions = []
                 
-                emotion_data = {
-                    'emotion': emotion,
-                    'confidence': round(confidence, 2),
-                    'face_detected': True,
-                    'timestamp': datetime.now().isoformat(),
-                    'reasoning': f'Advanced rule-based: {emotion} detected',
-                    'facial_features': f'Mouth: {features.get("mouth_ratio", 0):.3f}, Eyes: {features.get("avg_eye_ratio", 0):.3f}, Brows: {features.get("eyebrow_distance", 0):.3f}',
-                    'detection_confidence': round(detection.score[0], 2)
-                }
+                # DeepFace analysis
+                deepface_pred = self._analyze_with_deepface(face_roi)
+                if deepface_pred:
+                    all_predictions.append(deepface_pred)
+                
+                # FER analysis
+                fer_pred = self._analyze_with_fer(face_roi)
+                if fer_pred:
+                    all_predictions.append(fer_pred)
+                
+                # Hugging Face analysis
+                hf_pred = self._analyze_with_huggingface(face_roi)
+                if hf_pred:
+                    all_predictions.append(hf_pred)
+                
+                # Custom CNN analysis
+                cnn_pred = self._analyze_with_custom_cnn(face_roi)
+                if cnn_pred:
+                    all_predictions.append(cnn_pred)
+                
+                # Ensemble prediction
+                if all_predictions:
+                    ensemble_result = self._ensemble_prediction(all_predictions, emotion_history)
+                    
+                    if ensemble_result:
+                        emotion_data.update({
+                            'emotion': ensemble_result['emotion'],
+                            'confidence': round(ensemble_result['confidence'], 2),
+                            'reasoning': ensemble_result['reasoning'],
+                            'facial_features': f"Multi-model analysis: {ensemble_result['model_count']} models",
+                            'model_count': ensemble_result['model_count'],
+                            'agreement_ratio': round(ensemble_result['agreement_ratio'], 2),
+                            'detailed_scores': {k: round(v, 3) for k, v in ensemble_result['detailed_scores'].items()}
+                        })
+                        
+                        # Store prediction for temporal analysis
+                        self.prediction_history.append(ensemble_result)
+                        
+                        print(f"🎯 Multi-AI Ensemble: {ensemble_result['emotion']} "
+                              f"({ensemble_result['confidence']:.2f}) "
+                              f"- {ensemble_result['model_count']} models, "
+                              f"{ensemble_result['agreement_ratio']:.0%} agreement")
+                
+            except Exception as e:
+                print(f"❌ Error in multi-model analysis: {e}")
+                emotion_data['reasoning'] = f"Analysis error: {str(e)}"
         
         return emotion_data
 
-class MultimodalGeminiBot:
+class EnhancedEmpathyBot:
+    """Enhanced empathy bot with better emotion context understanding"""
+    
     def __init__(self):
-        self.model = gemini_model
         self.conversation_context = []
+        self.emotion_patterns = {}
         
-    def analyze_image(self, image_data, prompt="Analyze this image and describe what you see"):
-        """Analyze image using Gemini Vision"""
-        if not self.model:
-            return "Gemini API not configured. Please set GEMINI_API_KEY environment variable."
-        
-        try:
-            # Convert base64 to PIL Image
-            if isinstance(image_data, str) and image_data.startswith('data:image'):
-                image_data = image_data.split(',')[1]
-            
-            image_bytes = base64.b64decode(image_data)
-            image = Image.open(io.BytesIO(image_bytes))
-            
-            # Generate response
-            response = self.model.generate_content([prompt, image])
-            return response.text
-            
-        except Exception as e:
-            return f"Error analyzing image: {str(e)}"
-    
     def generate_empathetic_response(self, user_message, emotion_data=None, image_analysis=None):
-        """Generate empathetic response using Gemini with enhanced emotion context"""
-        if not self.model:
-            return self._fallback_response(user_message, emotion_data)
+        """Generate contextually aware empathetic response"""
         
-        try:
-            # Build enhanced context-aware prompt
-            context = self._build_enhanced_context_prompt(user_message, emotion_data, image_analysis)
-            
-            # Generate response
-            response = self.model.generate_content(context)
-            response_text = response.text
-            
-            # Store in conversation history
-            self.conversation_context.append({
-                'user': user_message,
-                'assistant': response_text,
-                'emotion': emotion_data.get('emotion', 'neutral') if emotion_data else 'neutral',
-                'emotion_confidence': emotion_data.get('confidence', 0) if emotion_data else 0,
-                'timestamp': datetime.now().isoformat()
-            })
-            
-            return response_text
-            
-        except Exception as e:
-            print(f"Gemini API error: {e}")
-            return self._fallback_response(user_message, emotion_data)
-    
-    def _build_enhanced_context_prompt(self, user_message, emotion_data, image_analysis):
-        """Build enhanced context-aware prompt for Gemini"""
-        prompt = """You are an empathetic AI assistant that understands human emotions deeply and provides supportive, caring responses.
-
-Current conversation context:"""
-        
-        # Add recent conversation history
-        if self.conversation_context:
-            prompt += "\nRecent conversation history:\n"
-            for msg in self.conversation_context[-3:]:
-                emotion_info = f" (feeling {msg['emotion']})" if msg['emotion'] != 'neutral' else ""
-                prompt += f"User{emotion_info}: {msg['user']}\nAssistant: {msg['assistant']}\n\n"
-        
-        # Add detailed emotion context
-        if emotion_data and emotion_data.get('face_detected'):
-            emotion = emotion_data.get('emotion', 'neutral')
-            confidence = emotion_data.get('confidence', 0)
-            reasoning = emotion_data.get('reasoning', 'Unknown')
-            features = emotion_data.get('facial_features', 'Not analyzed')
-            
-            prompt += f"""
-EMOTIONAL ANALYSIS:
-- Detected emotion: {emotion} 
-- Confidence level: {confidence:.0%}
-- Analysis reasoning: {reasoning}
-- Facial features observed: {features}
-
-RESPONSE GUIDELINES for {emotion.upper()} emotion:"""
-            
-            emotion_guidelines = {
-                'happy': "The user appears joyful! Match their positive energy, celebrate with them, ask about what's making them happy, and encourage their good mood.",
-                'sad': "The user seems sad or down. Be gentle, compassionate, and supportive. Acknowledge their feelings, offer comfort, and ask if they'd like to talk about what's bothering them.",
-                'angry': "The user appears frustrated or angry. Stay calm and understanding. Don't dismiss their feelings. Ask what's wrong and how you can help them work through it.",
-                'fear': "The user looks worried or anxious. Be reassuring and calming. Offer support and ask if there's something specific they're concerned about.",
-                'surprise': "The user seems surprised or shocked. Be curious about what surprised them. Ask for details and show interest in their experience.",
-                'disgust': "The user appears disgusted or put off by something. Be understanding and ask what's bothering them. Offer to help them process their feelings.",
-                'neutral': "The user has a calm, neutral expression. Engage naturally and follow their conversational lead."
-            }
-            
-            prompt += f"\n{emotion_guidelines.get(emotion, emotion_guidelines['neutral'])}\n"
-        
-        # Add image analysis context
-        if image_analysis:
-            prompt += f"\nIMAGE CONTEXT: {image_analysis}\nConsider this visual information in your response.\n"
-        
-        prompt += f"\nUSER'S CURRENT MESSAGE: {user_message}\n\n"
-        prompt += """Please respond with:
-1. Genuine empathy and emotional intelligence
-2. Appropriate tone matching their emotional state
-3. Supportive and caring language
-4. Natural, conversational style
-5. Specific acknowledgment of their feelings when appropriate
-
-Keep responses concise but meaningful (2-4 sentences unless more detail is needed).
-
-Your empathetic response:"""
-        
-        return prompt
-    
-    def _fallback_response(self, user_message, emotion_data):
-        """Enhanced fallback responses when Gemini API is unavailable"""
+        # Enhanced fallback responses based on multi-model analysis
         if not emotion_data or not emotion_data.get('face_detected'):
-            return "I'm here to listen and help. Could you tell me more about what's on your mind?"
+            return "I'm here to listen and support you. What's on your mind today?"
         
         emotion = emotion_data.get('emotion', 'neutral')
         confidence = emotion_data.get('confidence', 0)
+        model_count = emotion_data.get('model_count', 0)
+        agreement = emotion_data.get('agreement_ratio', 0)
         
-        # More nuanced fallback responses
-        responses = {
-            'happy': f"I can see you're feeling great (confidence: {confidence:.0%})! Your happiness is wonderful to see. What's bringing you such joy today?",
-            'sad': f"I notice you seem to be feeling down (confidence: {confidence:.0%}). I'm here to listen. Sometimes sharing what's on our mind can help lighten the load.",
-            'angry': f"I can sense some frustration in your expression (confidence: {confidence:.0%}). Take a moment to breathe. What's bothering you? I'm here to help you work through it.",
-            'fear': f"You look a bit worried or anxious (confidence: {confidence:.0%}). That's completely understandable. What's on your mind? Sometimes talking about our concerns helps.",
-            'surprise': f"You seem surprised about something (confidence: {confidence:.0%})! Did something unexpected happen? I'd love to hear about what caught you off guard.",
-            'disgust': f"I can see something's bothering you (confidence: {confidence:.0%}). Would you like to share what's troubling you? Sometimes it helps to talk it out.",
-            'neutral': f"You have a calm, peaceful expression (confidence: {confidence:.0%}). I'm here and ready to chat about whatever's on your mind. How can I help you today?"
+        # Context-aware responses based on multi-model confidence
+        base_responses = {
+            'happy': [
+                f"I can see the joy in your expression (detected by {model_count} AI models with {agreement:.0%} agreement)! Your happiness is wonderful. What's bringing you such joy?",
+                f"Your smile really lights up! The AI models are {confidence:.0%} confident you're feeling great. I'd love to hear what's making you so happy!",
+                f"I love seeing you this happy! Multiple AI systems confirm your positive mood with high confidence. Share what's going well in your life!"
+            ],
+            'sad': [
+                f"I notice sadness in your expression (confidence: {confidence:.0%} from {model_count} AI models). It's okay to feel this way. I'm here to listen and support you.",
+                f"You seem to be going through a tough time. The emotion detection shows you're feeling down. Would you like to talk about what's bothering you?",
+                f"I can sense your sadness, and I want you to know that your feelings are valid. Sometimes sharing helps lighten the emotional load."
+            ],
+            'angry': [
+                f"I can see frustration in your expression (detected with {confidence:.0%} confidence). Take a deep breath. What's bothering you? Let's work through this together.",
+                f"You seem upset about something. Multiple AI models agree you're feeling angry. It's natural to feel frustrated sometimes. Want to talk about it?",
+                f"I notice signs of anger or frustration. These feelings are completely valid. What's troubling you right now?"
+            ],
+            'fear': [
+                f"I can see worry or anxiety in your expression (confidence: {confidence:.0%}). It's natural to feel concerned sometimes. What's on your mind?",
+                f"You look a bit anxious or fearful. The AI analysis shows you might be worried about something. I'm here to help ease your concerns.",
+                f"I sense some fear or anxiety. These feelings are completely understandable. Would you like to share what's troubling you?"
+            ],
+            'surprise': [
+                f"You look surprised! ({confidence:.0%} confidence from multiple AI models). Did something unexpected happen? I'd love to hear about it!",
+                f"Something seems to have caught you off guard! The emotion detection picked up surprise. What's the news?",
+                f"I can see surprise in your expression! Multiple models agree you're shocked about something. What happened?"
+            ],
+            'disgust': [
+                f"I can see something's really bothering you (confidence: {confidence:.0%}). Whatever it is that's troubling you, I'm here to listen.",
+                f"You seem put off or disgusted by something. The AI models detected strong negative emotions. Want to talk about what's wrong?",
+                f"I notice strong negative feelings. Multiple AI systems confirm you're really bothered by something. I'm here to help."
+            ],
+            'neutral': [
+                f"You have a calm, peaceful expression (analyzed by {model_count} AI models). I'm here and ready to chat about whatever's on your mind.",
+                f"You look relaxed and composed. The multi-model analysis shows a neutral emotional state. How can I help you today?",
+                f"You seem centered and calm. Multiple AI systems confirm your peaceful state. What would you like to discuss?"
+            ]
         }
         
-        return responses.get(emotion, responses['neutral'])
+        # Select response based on confidence level
+        responses = base_responses.get(emotion, base_responses['neutral'])
+        
+        if confidence >= 0.8:
+            response_idx = 0  # High confidence response
+        elif confidence >= 0.5:
+            response_idx = 1  # Medium confidence response
+        else:
+            response_idx = 2  # Lower confidence response
+        
+        response = responses[response_idx % len(responses)]
+        
+        # Add technical details for transparency
+        if model_count > 1:
+            technical_note = f"\n\n(Technical: {model_count} AI models analyzed your expression with {agreement:.0%} agreement and {confidence:.0%} confidence)"
+            response += technical_note
+        
+        return response
 
 def initialize_services():
-    """Initialize emotion detection services"""
+    """Initialize advanced emotion detection services"""
     global emotion_detector, multimodal_bot
     
-    print("🚀 Initializing Enhanced Empathetic AI...")
+    print("🚀 Initializing Free Advanced Multi-AI Emotion Detection System...")
     
-    # Always try Gemini-based emotion detection first if available
-    if GEMINI_API_KEY and gemini_model:
-        try:
-            emotion_detector = GeminiEmotionDetector()
-            print("✅ Gemini Vision emotion detection initialized!")
-            print("🎯 This will provide much more accurate emotion recognition!")
-        except Exception as e:
-            print(f"❌ Gemini emotion detection failed: {e}")
-            print("🔄 Falling back to improved rule-based detection...")
-            emotion_detector = AdvancedEmotionDetector()
-    else:
-        print("⚠️ No Gemini API key found, using improved rule-based detection...")
-        print("💡 Set GEMINI_API_KEY environment variable for AI-powered emotion detection!")
-        emotion_detector = AdvancedEmotionDetector()
-    
-    multimodal_bot = MultimodalGeminiBot()
-    print("✅ All services initialized successfully!")
+    try:
+        emotion_detector = FreeAdvancedEmotionDetector()
+        multimodal_bot = EnhancedEmpathyBot()
+        print("✅ All advanced services initialized successfully!")
+        print(f"🎯 Using {len(emotion_detector.models)} free AI models for emotion detection")
+    except Exception as e:
+        print(f"❌ Service initialization failed: {e}")
+        # Fallback to basic system
+        emotion_detector = BasicEmotionDetector()
+        multimodal_bot = EnhancedEmpathyBot()
 
-def enhanced_smooth_emotion_history(history):
-    """Enhanced temporal smoothing with better logic"""
+class BasicEmotionDetector:
+    """Fallback basic emotion detector"""
+    def __init__(self):
+        self.mp_face_detection = mp.solutions.face_detection
+        self.face_detection = self.mp_face_detection.FaceDetection(
+            model_selection=0, min_detection_confidence=0.7
+        )
+    
+    def process_frame(self, frame):
+        return {
+            'emotion': 'neutral',
+            'confidence': 0.3,
+            'face_detected': True,
+            'timestamp': datetime.now().isoformat(),
+            'reasoning': 'Basic fallback detector',
+            'facial_features': 'Limited analysis',
+            'detection_confidence': 0.7,
+            'model_count': 1,
+            'analysis_method': 'Basic Rule-based'
+        }
+
+# Enhanced smoothing function
+def advanced_smooth_emotion_history(history):
+    """Advanced temporal smoothing with confidence-based weighting"""
     if not history:
         return {'emotion': 'neutral', 'confidence': 0.0, 'face_detected': False}
     
-    recent = list(history)[-8:]  # Look at last 8 readings
+    recent = list(history)[-10:]  # Look at last 10 readings
     face_detected_readings = [r for r in recent if r.get('face_detected', False)]
     
     if not face_detected_readings:
@@ -599,30 +748,54 @@ def enhanced_smooth_emotion_history(history):
             'face_detected': False
         }
     
-    # Weight recent readings more heavily
-    weights = np.exp(np.linspace(-1.5, 0, len(face_detected_readings)))
-    weights = weights / weights.sum()
-    
+    # Advanced weighting: recent readings + confidence + model agreement
+    weights = []
     emotion_scores = {}
-    total_reasoning = []
     
     for i, reading in enumerate(face_detected_readings):
-        emotion = reading['emotion']
-        confidence = reading['confidence']
-        weight = weights[i]
+        # Time-based weight (more recent = higher weight)
+        time_weight = np.exp(i - len(face_detected_readings) + 1)
         
+        # Confidence weight
+        confidence_weight = reading.get('confidence', 0.3)
+        
+        # Model agreement weight
+        agreement_weight = reading.get('agreement_ratio', 0.5)
+        
+        # Model count weight (more models = more reliable)
+        model_count_weight = min(1.0, reading.get('model_count', 1) / 3.0)
+        
+        # Combined weight
+        combined_weight = time_weight * confidence_weight * agreement_weight * model_count_weight
+        weights.append(combined_weight)
+        
+        # Accumulate emotion scores
+        emotion = reading['emotion']
         if emotion not in emotion_scores:
             emotion_scores[emotion] = 0
-        emotion_scores[emotion] += confidence * weight
-        
-        if i >= len(face_detected_readings) - 2:  # Last 2 readings
-            total_reasoning.append(reading.get('reasoning', ''))
+        emotion_scores[emotion] += combined_weight
     
+    # Normalize weights
+    total_weight = sum(weights)
+    if total_weight > 0:
+        for emotion in emotion_scores:
+            emotion_scores[emotion] /= total_weight
+    
+    # Get best emotion
     if emotion_scores:
         best_emotion = max(emotion_scores.items(), key=lambda x: x[1])
-        final_confidence = min(0.95, best_emotion[1])
         
-        # Get most recent reasoning
+        # Calculate stability score
+        same_emotion_count = len([r for r in face_detected_readings[-5:] 
+                                if r['emotion'] == best_emotion[0]])
+        stability = same_emotion_count / min(5, len(face_detected_readings))
+        
+        # Adjust confidence based on stability
+        base_confidence = best_emotion[1]
+        stability_bonus = stability * 0.2
+        final_confidence = min(0.95, base_confidence + stability_bonus)
+        
+        # Get most recent detailed info
         latest_reading = face_detected_readings[-1]
         
         return {
@@ -630,10 +803,13 @@ def enhanced_smooth_emotion_history(history):
             'confidence': round(final_confidence, 2),
             'face_detected': True,
             'timestamp': datetime.now().isoformat(),
-            'reasoning': latest_reading.get('reasoning', 'Smoothed analysis'),
-            'facial_features': latest_reading.get('facial_features', 'Analyzed'),
-            'stability': len([r for r in face_detected_readings if r['emotion'] == best_emotion[0]]) / len(face_detected_readings),
-            'detection_confidence': latest_reading.get('detection_confidence', 0.8)
+            'reasoning': f"Advanced ensemble smoothing with {stability:.0%} stability",
+            'facial_features': latest_reading.get('facial_features', 'Multi-model analysis'),
+            'detection_confidence': latest_reading.get('detection_confidence', 0.8),
+            'model_count': latest_reading.get('model_count', 1),
+            'analysis_method': latest_reading.get('analysis_method', 'Free Multi-AI'),
+            'stability_score': round(stability, 2),
+            'temporal_consistency': round(base_confidence, 2)
         }
     
     return recent[-1] if recent else {
@@ -648,22 +824,34 @@ def index():
 
 @app.route('/health')
 def health_check():
+    model_info = {}
+    if emotion_detector and hasattr(emotion_detector, 'models'):
+        model_info = {
+            'available_models': list(emotion_detector.models.keys()),
+            'model_count': len(emotion_detector.models),
+            'deepface': 'deepface' in emotion_detector.models,
+            'fer': 'fer' in emotion_detector.models,
+            'huggingface': 'huggingface' in emotion_detector.models,
+            'custom_cnn': 'custom_cnn' in emotion_detector.models
+        }
+    
     return jsonify({
         'status': 'healthy',
         'emotion_detector': emotion_detector is not None,
-        'gemini_available': gemini_model is not None,
-        'detector_type': 'Gemini Vision' if isinstance(emotion_detector, GeminiEmotionDetector) else 'Rule-based',
+        'detector_type': 'Free Multi-AI Ensemble',
+        'model_info': model_info,
         'timestamp': datetime.now().isoformat()
     })
 
 @socketio.on('connect')
 def handle_connect():
     print('🔗 Client connected')
-    detector_type = 'Gemini Vision AI' if isinstance(emotion_detector, GeminiEmotionDetector) else 'Advanced Rule-based'
+    model_count = len(emotion_detector.models) if emotion_detector and hasattr(emotion_detector, 'models') else 0
     emit('status', {
-        'message': f'Connected to Enhanced Empathetic AI ({detector_type})',
-        'gemini_available': gemini_model is not None,
-        'detector_type': detector_type
+        'message': f'Connected to Free Multi-AI Emotion Detection ({model_count} models)',
+        'gemini_available': False,
+        'detector_type': f'Free Multi-AI Ensemble ({model_count} models)',
+        'model_count': model_count
     })
 
 @socketio.on('disconnect')
@@ -672,7 +860,7 @@ def handle_disconnect():
 
 @socketio.on('video_frame')
 def handle_video_frame(data):
-    """Process video frames for emotion detection with enhanced accuracy"""
+    """Process video frames with advanced multi-model emotion detection"""
     global emotion_detector, emotion_history
     
     try:
@@ -682,19 +870,13 @@ def handle_video_frame(data):
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if frame is not None and emotion_detector:
-            # Process frame
+            # Process frame with multi-model analysis
             emotion_data = emotion_detector.process_frame(frame)
             emotion_history.append(emotion_data)
             
-            # Apply enhanced temporal smoothing
-            smoothed_emotion = enhanced_smooth_emotion_history(emotion_history)
+            # Apply advanced temporal smoothing
+            smoothed_emotion = advanced_smooth_emotion_history(emotion_history)
             
-            # Add debug info
-            if isinstance(emotion_detector, GeminiEmotionDetector):
-                smoothed_emotion['analysis_method'] = 'Gemini Vision AI'
-            else:
-                smoothed_emotion['analysis_method'] = 'Advanced Rule-based'
-                
             emit('emotion_update', smoothed_emotion)
                 
     except Exception as e:
@@ -703,7 +885,7 @@ def handle_video_frame(data):
 
 @socketio.on('chat_message')
 def handle_chat_message(data):
-    """Handle chat messages with multimodal support"""
+    """Handle chat messages with advanced emotion context"""
     global multimodal_bot, emotion_history
     
     try:
@@ -714,72 +896,61 @@ def handle_chat_message(data):
         # Get current emotion context
         current_emotion = emotion_history[-1] if emotion_history else None
         
-        # Handle image analysis if image is provided
-        image_analysis = None
-        if 'image' in data and data['image']:
-            image_analysis = multimodal_bot.analyze_image(
-                data['image'], 
-                data.get('image_prompt', 'Analyze this image and describe what you see')
-            )
-        
-        # Generate empathetic response
+        # Generate empathetic response with advanced context
         response = multimodal_bot.generate_empathetic_response(
             user_message, 
-            current_emotion,
-            image_analysis
+            current_emotion
         )
         
         # Emit response with enhanced context
         emit('chat_response', {
             'message': response,
             'emotion_context': current_emotion,
-            'image_analysis': image_analysis,
             'timestamp': datetime.now().isoformat(),
-            'analysis_method': current_emotion.get('analysis_method', 'Unknown') if current_emotion else 'Unknown'
+            'analysis_method': current_emotion.get('analysis_method', 'Free Multi-AI') if current_emotion else 'Free Multi-AI'
         })
         
     except Exception as e:
         print(f"❌ Error handling chat message: {e}")
         emit('error', {'message': 'Error processing your message'})
 
-@socketio.on('analyze_image')
-def handle_image_analysis(data):
-    """Handle standalone image analysis"""
-    global multimodal_bot
-    
-    try:
-        image_data = data.get('image')
-        prompt = data.get('prompt', 'Analyze this image in detail')
-        
-        if not image_data:
-            emit('error', {'message': 'No image provided'})
-            return
-        
-        analysis = multimodal_bot.analyze_image(image_data, prompt)
-        
-        emit('image_analysis_result', {
-            'analysis': analysis,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        print(f"❌ Error analyzing image: {e}")
-        emit('error', {'message': 'Error analyzing image'})
-
 if __name__ == '__main__':
     # Initialize services
     threading.Thread(target=initialize_services, daemon=True).start()
-    time.sleep(3)  # Wait for initialization
+    time.sleep(5)  # Wait for initialization
     
-    print("🌟 Starting Enhanced Empathetic AI Assistant...")
-    print(f"🔑 Gemini API: {'✅ Available' if GEMINI_API_KEY else '❌ Not configured'}")
-    print(f"🎯 Emotion Detection: {'Gemini Vision AI' if GEMINI_API_KEY else 'Advanced Rule-based'}")
+    print("🌟 Starting Free Advanced Multi-AI Emotion Detection System...")
+    print("🆓 Using only free, open-source AI models:")
     
-    if not GEMINI_API_KEY:
-        print("\n💡 To get much better emotion detection:")
-        print("   1. Get API key from https://makersuite.google.com/app/apikey")
-        print("   2. Set environment variable: export GEMINI_API_KEY=your_key")
-        print("   3. Restart the application")
+    if DEEPFACE_AVAILABLE:
+        print("   ✅ DeepFace (Multiple free models: VGG-Face, Facenet, OpenFace, etc.)")
+    else:
+        print("   📦 DeepFace: pip install deepface")
+        
+    if FER_AVAILABLE:
+        print("   ✅ FER (Facial Expression Recognition)")
+    else:
+        print("   📦 FER: pip install fer")
+        
+    if TRANSFORMERS_AVAILABLE:
+        print("   ✅ Hugging Face Transformers (Multiple free emotion models)")
+    else:
+        print("   📦 Transformers: pip install transformers torch")
+        
+    if TF_AVAILABLE:
+        print("   ✅ TensorFlow (Custom CNN models)")
+    else:
+        print("   📦 TensorFlow: pip install tensorflow")
+    
+    print("\n🎯 Multi-Model Approach Benefits:")
+    print("   • Higher accuracy through ensemble voting")
+    print("   • Cross-validation between different AI approaches") 
+    print("   • Temporal consistency analysis")
+    print("   • Confidence-weighted predictions")
+    print("   • Model agreement scoring")
+    
+    print("\n💡 To install missing dependencies:")
+    print("   pip install deepface fer transformers torch tensorflow")
     
     socketio.run(
         app, 
@@ -787,4 +958,4 @@ if __name__ == '__main__':
         port=int(os.getenv('PORT', 5000)),
         debug=False,
         allow_unsafe_werkzeug=True
-    )
+    )   

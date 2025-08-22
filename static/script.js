@@ -1,4 +1,4 @@
-class EnhancedEmpathyBot {
+class AdvancedMultiAIEmpathyBot {
     constructor() {
         this.socket = io();
         this.isVideoActive = false;
@@ -6,10 +6,11 @@ class EnhancedEmpathyBot {
         this.canvasElement = document.getElementById('canvasElement');
         this.context = this.canvasElement.getContext('2d');
         this.lastEmotionUpdate = Date.now();
-        this.emotionUpdateInterval = 1000; // Reduced frequency for Gemini API
+        this.emotionUpdateInterval = 500; // Faster updates for multi-AI system
         this.currentImage = null;
-        this.geminiAvailable = false;
-        this.analysisMethod = 'Unknown';
+        this.modelCount = 0;
+        this.analysisMethod = 'Free Multi-AI Ensemble';
+        this.emotionTrends = [];
         
         this.init();
     }
@@ -18,16 +19,16 @@ class EnhancedEmpathyBot {
         this.setupSocketListeners();
         this.setupUIEventListeners();
         this.setupVideoStream();
-        this.setupMultimodal();
+        this.setupAdvancedUI();
         this.updateConnectionStatus();
     }
     
     setupSocketListeners() {
         // Connection events
         this.socket.on('connect', () => {
-            console.log('✅ Connected to Enhanced Empathetic AI');
+            console.log('✅ Connected to Advanced Multi-AI Emotion Detection');
             this.updateConnectionStatus(true);
-            this.showStatusMessage('Connected to Enhanced AI', 'success');
+            this.showStatusMessage('Connected to Multi-AI System', 'success');
         });
         
         this.socket.on('disconnect', () => {
@@ -36,33 +37,27 @@ class EnhancedEmpathyBot {
             this.showStatusMessage('Connection lost. Reconnecting...', 'error');
         });
         
-        // Status and capabilities
+        // Enhanced status with model information
         this.socket.on('status', (data) => {
-            this.geminiAvailable = data.gemini_available;
-            this.analysisMethod = data.detector_type || 'Unknown';
-            this.updateGeminiStatus();
-            this.updateAnalysisMethod();
+            this.modelCount = data.model_count || 0;
+            this.analysisMethod = data.detector_type || 'Multi-AI Ensemble';
+            this.updateModelInfo();
             this.showStatusMessage(data.message, 'success');
         });
         
-        // Enhanced emotion detection
+        // Advanced emotion detection with multi-model data
         this.socket.on('emotion_update', (data) => {
-            this.updateEnhancedEmotionDisplay(data);
+            this.updateAdvancedEmotionDisplay(data);
+            this.trackEmotionTrends(data);
         });
         
-        // Chat responses with emotion context
+        // Enhanced chat responses
         this.socket.on('chat_response', (data) => {
-            this.addEnhancedMessage(data.message, 'assistant', {
+            this.addAdvancedMessage(data.message, 'assistant', {
                 emotion_context: data.emotion_context,
-                image_analysis: data.image_analysis,
                 analysis_method: data.analysis_method
             });
             this.hideTypingIndicator();
-        });
-        
-        // Image analysis results
-        this.socket.on('image_analysis_result', (data) => {
-            this.showImageAnalysis(data.analysis);
         });
         
         // Error handling
@@ -73,80 +68,540 @@ class EnhancedEmpathyBot {
         });
     }
     
+    setupAdvancedUI() {
+        // Add model information panel
+        this.createModelInfoPanel();
+        // Add emotion trends chart
+        this.createEmotionTrendsChart();
+        // Add confidence meter enhancements
+        this.enhanceConfidenceMeter();
+    }
+    
+    createModelInfoPanel() {
+        const videoSection = document.querySelector('.video-section');
+        if (!videoSection) return;
+        
+        const modelPanel = document.createElement('div');
+        modelPanel.className = 'model-info-panel';
+        modelPanel.innerHTML = `
+            <div class="panel-header">
+                <h4><i class="fas fa-brain"></i> AI Models</h4>
+            </div>
+            <div class="model-stats" id="modelStats">
+                <div class="stat">
+                    <span class="stat-label">Active Models:</span>
+                    <span class="stat-value" id="modelCount">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Analysis Method:</span>
+                    <span class="stat-value" id="analysisMethod">Loading...</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Agreement:</span>
+                    <span class="stat-value" id="modelAgreement">--</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Stability:</span>
+                    <span class="stat-value" id="emotionStability">--</span>
+                </div>
+            </div>
+            <div class="model-indicators" id="modelIndicators">
+                <!-- Dynamic model indicators will be added here -->
+            </div>
+        `;
+        
+        videoSection.appendChild(modelPanel);
+    }
+    
+    createEmotionTrendsChart() {
+        const rightPanel = document.querySelector('.right-panel');
+        if (!rightPanel) return;
+        
+        const trendsPanel = document.createElement('div');
+        trendsPanel.className = 'emotion-trends-panel';
+        trendsPanel.innerHTML = `
+            <div class="panel-header">
+                <h4><i class="fas fa-chart-line"></i> Emotion Trends</h4>
+                <button class="toggle-btn" id="toggleTrends">
+                    <i class="fas fa-chevron-up"></i>
+                </button>
+            </div>
+            <div class="trends-content" id="trendsContent">
+                <canvas id="emotionChart" width="300" height="120"></canvas>
+                <div class="trend-stats" id="trendStats">
+                    <div class="trend-stat">
+                        <span>Dominant:</span>
+                        <span id="dominantEmotion">neutral</span>
+                    </div>
+                    <div class="trend-stat">
+                        <span>Avg Confidence:</span>
+                        <span id="avgConfidence">0%</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        rightPanel.insertBefore(trendsPanel, rightPanel.firstChild);
+        this.initEmotionChart();
+    }
+    
+    initEmotionChart() {
+        const canvas = document.getElementById('emotionChart');
+        if (!canvas) return;
+        
+        this.chartCtx = canvas.getContext('2d');
+        this.emotionColors = {
+            'happy': '#22c55e',
+            'sad': '#3b82f6', 
+            'angry': '#ef4444',
+            'fear': '#8b5cf6',
+            'surprise': '#f59e0b',
+            'disgust': '#84cc16',
+            'neutral': '#6b7280'
+        };
+        
+        this.drawEmotionChart();
+    }
+    
+    drawEmotionChart() {
+        if (!this.chartCtx || this.emotionTrends.length === 0) return;
+        
+        const ctx = this.chartCtx;
+        const canvas = ctx.canvas;
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, width, height);
+        
+        // Draw grid
+        ctx.strokeStyle = '#374151';
+        ctx.lineWidth = 1;
+        
+        // Horizontal lines
+        for (let i = 0; i <= 4; i++) {
+            const y = (height / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+        }
+        
+        // Draw emotion trend lines
+        const maxDataPoints = 50;
+        const recentTrends = this.emotionTrends.slice(-maxDataPoints);
+        
+        if (recentTrends.length > 1) {
+            const stepX = width / (maxDataPoints - 1);
+            
+            // Group by emotion
+            const emotionData = {};
+            recentTrends.forEach((trend, index) => {
+                const emotion = trend.emotion;
+                if (!emotionData[emotion]) {
+                    emotionData[emotion] = [];
+                }
+                emotionData[emotion].push({
+                    x: (index / (recentTrends.length - 1)) * width,
+                    y: height - (trend.confidence * height),
+                    confidence: trend.confidence
+                });
+            });
+            
+            // Draw lines for each emotion
+            Object.entries(emotionData).forEach(([emotion, points]) => {
+                if (points.length > 1) {
+                    ctx.strokeStyle = this.emotionColors[emotion] || '#6b7280';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    
+                    points.forEach((point, index) => {
+                        if (index === 0) {
+                            ctx.moveTo(point.x, point.y);
+                        } else {
+                            ctx.lineTo(point.x, point.y);
+                        }
+                    });
+                    
+                    ctx.stroke();
+                }
+            });
+        }
+    }
+    
+    trackEmotionTrends(emotionData) {
+        if (!emotionData.face_detected) return;
+        
+        this.emotionTrends.push({
+            emotion: emotionData.emotion,
+            confidence: emotionData.confidence,
+            timestamp: Date.now(),
+            modelCount: emotionData.model_count || 1,
+            agreement: emotionData.agreement_ratio || 0
+        });
+        
+        // Keep only last 100 data points
+        if (this.emotionTrends.length > 100) {
+            this.emotionTrends = this.emotionTrends.slice(-100);
+        }
+        
+        // Update chart and stats
+        this.drawEmotionChart();
+        this.updateTrendStats();
+    }
+    
+    updateTrendStats() {
+        const recent = this.emotionTrends.slice(-20); // Last 20 readings
+        
+        if (recent.length === 0) return;
+        
+        // Find dominant emotion
+        const emotionCounts = {};
+        let totalConfidence = 0;
+        
+        recent.forEach(trend => {
+            emotionCounts[trend.emotion] = (emotionCounts[trend.emotion] || 0) + 1;
+            totalConfidence += trend.confidence;
+        });
+        
+        const dominantEmotion = Object.entries(emotionCounts)
+            .sort(([,a], [,b]) => b - a)[0]?.[0] || 'neutral';
+        
+        const avgConfidence = (totalConfidence / recent.length) * 100;
+        
+        // Update UI
+        const dominantEl = document.getElementById('dominantEmotion');
+        const avgConfEl = document.getElementById('avgConfidence');
+        
+        if (dominantEl) dominantEl.textContent = dominantEmotion;
+        if (avgConfEl) avgConfEl.textContent = `${avgConfidence.toFixed(0)}%`;
+    }
+    
+    updateAdvancedEmotionDisplay(emotionData) {
+        // Update basic emotion display
+        this.updateBasicEmotionDisplay(emotionData);
+        
+        // Update advanced multi-AI specific information
+        this.updateModelAgreement(emotionData.agreement_ratio);
+        this.updateStabilityScore(emotionData.stability_score);
+        this.updateModelCount(emotionData.model_count);
+        
+        // Update detailed scores if available
+        if (emotionData.detailed_scores) {
+            this.updateDetailedScores(emotionData.detailed_scores);
+        }
+        
+        // Log advanced info
+        if (emotionData.confidence > 0.5) {
+            console.log(`🎯 Multi-AI Detection: ${emotionData.emotion} ` +
+                       `(${(emotionData.confidence * 100).toFixed(0)}% confidence, ` +
+                       `${emotionData.model_count} models, ` +
+                       `${(emotionData.agreement_ratio * 100).toFixed(0)}% agreement)`);
+        }
+    }
+    
+    updateBasicEmotionDisplay(emotionData) {
+        const elements = {
+            emoji: document.getElementById('emotionEmoji'),
+            label: document.getElementById('emotionLabel'),
+            confidenceFill: document.getElementById('confidenceFill'),
+            confidenceText: document.getElementById('confidenceText'),
+            faceStatus: document.getElementById('faceStatus'),
+            emotionContext: document.getElementById('emotionContext'),
+            contextEmotion: document.getElementById('contextEmotion')
+        };
+        
+        // Enhanced emotion emojis with more variety
+        const emojiSets = {
+            'happy': ['😊', '😄', '😁', '🙂', '☺️', '😆', '🤗'],
+            'sad': ['😢', '😞', '😔', '🙁', '😟', '😪', '💔'],
+            'angry': ['😠', '😡', '😤', '🤬', '👿', '😾', '🗯️'],
+            'fear': ['😰', '😨', '😟', '😧', '🫨', '😳', '🙀'],
+            'surprise': ['😲', '😮', '🤯', '😯', '😦', '🫢', '😵'],
+            'disgust': ['🤢', '🤮', '😖', '😣', '🫤', '😤', '🤧'],
+            'neutral': ['😐', '😑', '🙂', '😌', '😶', '🤔', '😊']
+        };
+        
+        const emotion = emotionData.emotion || 'neutral';
+        const confidence = Math.round((emotionData.confidence || 0) * 100);
+        const emojiSet = emojiSets[emotion] || emojiSets['neutral'];
+        const emoji = emojiSet[Math.floor(Math.random() * emojiSet.length)];
+        
+        // Smooth emoji transition
+        if (elements.emoji) {
+            elements.emoji.classList.add('emotion-transition');
+            setTimeout(() => {
+                elements.emoji.textContent = emoji;
+                elements.emoji.classList.remove('emotion-transition');
+            }, 200);
+        }
+        
+        if (elements.label) {
+            elements.label.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+        }
+        
+        // Enhanced confidence bar with gradient
+        if (elements.confidenceFill && elements.confidenceText) {
+            elements.confidenceFill.style.width = `${confidence}%`;
+            elements.confidenceText.textContent = `${confidence}% confidence`;
+            
+            // Dynamic color based on confidence and emotion
+            const emotionColors = {
+                'happy': '#22c55e',
+                'sad': '#3b82f6',
+                'angry': '#ef4444',
+                'fear': '#8b5cf6',
+                'surprise': '#f59e0b',
+                'disgust': '#84cc16',
+                'neutral': '#6b7280'
+            };
+            
+            const baseColor = emotionColors[emotion] || '#10b981';
+            const gradient = `linear-gradient(90deg, ${baseColor}, ${baseColor}aa)`;
+            elements.confidenceFill.style.background = gradient;
+        }
+        
+        // Enhanced face detection status
+        if (elements.faceStatus) {
+            if (emotionData.face_detected) {
+                elements.faceStatus.classList.add('detected');
+                const modelCount = emotionData.model_count || 1;
+                const method = emotionData.analysis_method || 'Multi-AI';
+                elements.faceStatus.innerHTML = `
+                    <i class="fas fa-check-circle"></i>
+                    <span>Face detected • ${method} (${modelCount} models)</span>
+                `;
+                
+                if (emotionData.reasoning) {
+                    elements.faceStatus.title = `Analysis: ${emotionData.reasoning}`;
+                }
+            } else {
+                elements.faceStatus.classList.remove('detected');
+                elements.faceStatus.innerHTML = '<i class="fas fa-search"></i><span>Looking for face...</span>';
+                elements.faceStatus.title = '';
+            }
+        }
+        
+        // Enhanced emotion context
+        if (elements.emotionContext && elements.contextEmotion) {
+            if (emotionData.face_detected && emotion !== 'neutral' && confidence >= 40) {
+                elements.emotionContext.style.display = 'flex';
+                elements.contextEmotion.textContent = emotion;
+                
+                // Add additional context info
+                const contextInfo = elements.emotionContext.querySelector('.context-info');
+                if (!contextInfo) {
+                    const infoDiv = document.createElement('div');
+                    infoDiv.className = 'context-info';
+                    elements.emotionContext.appendChild(infoDiv);
+                }
+                
+                const info = elements.emotionContext.querySelector('.context-info');
+                if (info) {
+                    info.textContent = `${confidence}% confidence • ${emotionData.model_count || 1} AI models`;
+                }
+            } else {
+                elements.emotionContext.style.display = 'none';
+            }
+        }
+    }
+    
+    updateModelAgreement(agreement) {
+        const agreementEl = document.getElementById('modelAgreement');
+        if (agreementEl && agreement !== undefined) {
+            agreementEl.textContent = `${(agreement * 100).toFixed(0)}%`;
+            
+            // Color code based on agreement level
+            if (agreement >= 0.8) {
+                agreementEl.style.color = '#22c55e'; // High agreement - green
+            } else if (agreement >= 0.6) {
+                agreementEl.style.color = '#f59e0b'; // Medium agreement - yellow
+            } else {
+                agreementEl.style.color = '#ef4444'; // Low agreement - red
+            }
+        }
+    }
+    
+    updateStabilityScore(stability) {
+        const stabilityEl = document.getElementById('emotionStability');
+        if (stabilityEl && stability !== undefined) {
+            stabilityEl.textContent = `${(stability * 100).toFixed(0)}%`;
+            
+            // Color code based on stability
+            if (stability >= 0.8) {
+                stabilityEl.style.color = '#22c55e';
+            } else if (stability >= 0.6) {
+                stabilityEl.style.color = '#f59e0b';
+            } else {
+                stabilityEl.style.color = '#ef4444';
+            }
+        }
+    }
+    
+    updateModelCount(count) {
+        const countEl = document.getElementById('modelCount');
+        if (countEl && count !== undefined) {
+            countEl.textContent = count;
+            this.modelCount = count;
+        }
+    }
+    
+    updateModelInfo() {
+        const methodEl = document.getElementById('analysisMethod');
+        if (methodEl) {
+            methodEl.textContent = this.analysisMethod;
+        }
+        
+        // Update model indicators
+        this.updateModelIndicators();
+    }
+    
+    updateModelIndicators() {
+        const indicatorsEl = document.getElementById('modelIndicators');
+        if (!indicatorsEl) return;
+        
+        const modelTypes = ['DeepFace', 'FER', 'HuggingFace', 'Custom CNN'];
+        indicatorsEl.innerHTML = '';
+        
+        modelTypes.forEach((modelType, index) => {
+            const indicator = document.createElement('div');
+            indicator.className = 'model-indicator';
+            
+            // Simulate model status (in real app, this would come from backend)
+            const isActive = index < this.modelCount;
+            
+            indicator.innerHTML = `
+                <div class="indicator-dot ${isActive ? 'active' : 'inactive'}"></div>
+                <span class="indicator-label">${modelType}</span>
+            `;
+            
+            indicatorsEl.appendChild(indicator);
+        });
+    }
+    
+    updateDetailedScores(scores) {
+        // Create or update detailed scores panel
+        let scoresPanel = document.querySelector('.detailed-scores-panel');
+        
+        if (!scoresPanel) {
+            scoresPanel = document.createElement('div');
+            scoresPanel.className = 'detailed-scores-panel';
+            scoresPanel.innerHTML = `
+                <div class="panel-header">
+                    <h5><i class="fas fa-chart-bar"></i> Detailed Scores</h5>
+                    <button class="toggle-btn" id="toggleScores">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+                <div class="scores-content" id="scoresContent" style="display: none;">
+                    <div class="emotion-bars" id="emotionBars"></div>
+                </div>
+            `;
+            
+            const emotionDisplay = document.querySelector('.emotion-display');
+            if (emotionDisplay) {
+                emotionDisplay.appendChild(scoresPanel);
+            }
+            
+            // Add toggle functionality
+            document.getElementById('toggleScores').addEventListener('click', () => {
+                const content = document.getElementById('scoresContent');
+                const icon = document.querySelector('#toggleScores i');
+                
+                if (content.style.display === 'none') {
+                    content.style.display = 'block';
+                    icon.className = 'fas fa-chevron-up';
+                } else {
+                    content.style.display = 'none';
+                    icon.className = 'fas fa-chevron-down';
+                }
+            });
+        }
+        
+        // Update emotion bars
+        const barsEl = document.getElementById('emotionBars');
+        if (barsEl && scores) {
+            barsEl.innerHTML = '';
+            
+            // Sort emotions by score
+            const sortedEmotions = Object.entries(scores)
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 7); // Show top 7 emotions
+            
+            sortedEmotions.forEach(([emotion, score]) => {
+                const barContainer = document.createElement('div');
+                barContainer.className = 'emotion-bar-container';
+                
+                const percentage = (score * 100).toFixed(1);
+                const color = this.emotionColors[emotion] || '#6b7280';
+                
+                barContainer.innerHTML = `
+                    <div class="emotion-bar-label">
+                        <span class="emotion-name">${emotion}</span>
+                        <span class="emotion-score">${percentage}%</span>
+                    </div>
+                    <div class="emotion-bar-track">
+                        <div class="emotion-bar-fill" style="width: ${percentage}%; background: ${color}"></div>
+                    </div>
+                `;
+                
+                barsEl.appendChild(barContainer);
+            });
+        }
+    }
+    
     setupUIEventListeners() {
         // Chat input
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
-        const imageBtn = document.getElementById('imageBtn');
         
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage();
-            }
-        });
+        if (messageInput) {
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage();
+                }
+            });
+            
+            messageInput.addEventListener('input', (e) => {
+                this.adjustTextareaHeight(e.target);
+            });
+        }
         
-        messageInput.addEventListener('input', (e) => {
-            this.adjustTextareaHeight(e.target);
-        });
-        
-        sendBtn.addEventListener('click', () => this.sendMessage());
-        imageBtn.addEventListener('click', () => this.triggerImageUpload());
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => this.sendMessage());
+        }
         
         // Camera controls
-        document.getElementById('toggleCamera').addEventListener('click', () => {
-            this.toggleVideoStream();
-        });
+        const toggleCamera = document.getElementById('toggleCamera');
+        if (toggleCamera) {
+            toggleCamera.addEventListener('click', () => {
+                this.toggleVideoStream();
+            });
+        }
         
-        // Quick capture
-        document.getElementById('quickCapture').addEventListener('click', () => {
-            this.quickCapture();
-        });
-        
-        // Image analysis buttons
-        document.getElementById('analyzeBtn').addEventListener('click', () => {
-            this.analyzeCurrentImage();
-        });
-        
-        document.getElementById('clearBtn').addEventListener('click', () => {
-            this.clearImagePreview();
-        });
+        // Trends panel toggle
+        const toggleTrends = document.getElementById('toggleTrends');
+        if (toggleTrends) {
+            toggleTrends.addEventListener('click', () => {
+                this.toggleTrendsPanel();
+            });
+        }
     }
     
-    setupMultimodal() {
-        const imageInput = document.getElementById('imageInput');
-        const uploadArea = document.getElementById('imageUploadArea');
+    toggleTrendsPanel() {
+        const content = document.getElementById('trendsContent');
+        const icon = document.querySelector('#toggleTrends i');
         
-        // File input change
-        imageInput.addEventListener('change', (e) => {
-            if (e.target.files[0]) {
-                this.handleImageUpload(e.target.files[0]);
-            }
-        });
+        if (!content || !icon) return;
         
-        // Drag and drop
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            
-            const files = e.dataTransfer.files;
-            if (files[0] && files[0].type.startsWith('image/')) {
-                this.handleImageUpload(files[0]);
-            }
-        });
-        
-        uploadArea.addEventListener('click', () => {
-            imageInput.click();
-        });
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            icon.className = 'fas fa-chevron-up';
+        } else {
+            content.style.display = 'none';
+            icon.className = 'fas fa-chevron-down';
+        }
     }
     
     async setupVideoStream() {
@@ -164,10 +619,10 @@ class EnhancedEmpathyBot {
             this.isVideoActive = true;
             
             this.videoElement.addEventListener('loadedmetadata', () => {
-                this.startEmotionDetection();
+                this.startAdvancedEmotionDetection();
             });
             
-            this.showStatusMessage('Camera activated successfully', 'success');
+            this.showStatusMessage('Camera activated - Multi-AI analysis ready', 'success');
             
         } catch (error) {
             console.error('Camera error:', error);
@@ -176,7 +631,7 @@ class EnhancedEmpathyBot {
         }
     }
     
-    startEmotionDetection() {
+    startAdvancedEmotionDetection() {
         if (!this.isVideoActive) return;
         
         const processFrame = () => {
@@ -196,7 +651,7 @@ class EnhancedEmpathyBot {
                 this.canvasElement.height = this.videoElement.videoHeight;
                 
                 this.context.drawImage(this.videoElement, 0, 0);
-                const imageData = this.canvasElement.toDataURL('image/jpeg', 0.7);
+                const imageData = this.canvasElement.toDataURL('image/jpeg', 0.8);
                 
                 this.socket.emit('video_frame', { image: imageData });
                 this.lastEmotionUpdate = now;
@@ -211,148 +666,31 @@ class EnhancedEmpathyBot {
         requestAnimationFrame(processFrame);
     }
     
-    updateEnhancedEmotionDisplay(emotionData) {
-        const elements = {
-            emoji: document.getElementById('emotionEmoji'),
-            label: document.getElementById('emotionLabel'),
-            confidenceFill: document.getElementById('confidenceFill'),
-            confidenceText: document.getElementById('confidenceText'),
-            faceStatus: document.getElementById('faceStatus'),
-            emotionContext: document.getElementById('emotionContext'),
-            contextEmotion: document.getElementById('contextEmotion')
-        };
-        
-        // Emotion emoji mapping with more variety
-        const emojiMap = {
-            'happy': ['😊', '😄', '😁', '🙂', '☺️'][Math.floor(Math.random() * 5)],
-            'sad': ['😢', '😞', '😔', '🙁', '😟'][Math.floor(Math.random() * 5)],
-            'angry': ['😠', '😡', '😤', '🤬', '👿'][Math.floor(Math.random() * 5)],
-            'fear': ['😰', '😨', '😟', '😧', '🫨'][Math.floor(Math.random() * 5)],
-            'surprise': ['😲', '😮', '🤯', '😯', '😦'][Math.floor(Math.random() * 5)],
-            'disgust': ['🤢', '🤮', '😖', '😣', '🫤'][Math.floor(Math.random() * 5)],
-            'neutral': ['😐', '😑', '🙂', '😌', '😶'][Math.floor(Math.random() * 5)]
-        };
-        
-        const emotion = emotionData.emotion || 'neutral';
-        const confidence = Math.round((emotionData.confidence || 0) * 100);
-        const emoji = emojiMap[emotion] || '😐';
-        
-        // Enhanced animation for emotion changes
-        elements.emoji.classList.add('emotion-transition');
-        setTimeout(() => elements.emoji.classList.remove('emotion-transition'), 800);
-        
-        elements.emoji.textContent = emoji;
-        elements.label.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
-        
-        // Enhanced confidence display with color coding
-        elements.confidenceFill.style.width = `${confidence}%`;
-        elements.confidenceText.textContent = `${confidence}% confidence`;
-        
-        // Color coding based on confidence level
-        const confidenceColors = {
-            high: '#22c55e',     // Green for high confidence (70%+)
-            medium: '#eab308',   // Yellow for medium confidence (40-70%)
-            low: '#ef4444'       // Red for low confidence (<40%)
-        };
-        
-        let confidenceColor = confidenceColors.low;
-        if (confidence >= 70) confidenceColor = confidenceColors.high;
-        else if (confidence >= 40) confidenceColor = confidenceColors.medium;
-        
-        elements.confidenceFill.style.background = `linear-gradient(90deg, ${confidenceColor}, ${confidenceColor}cc)`;
-        
-        // Enhanced face detection status with analysis method
-        if (emotionData.face_detected) {
-            elements.faceStatus.classList.add('detected');
-            const analysisMethod = emotionData.analysis_method || this.analysisMethod;
-            elements.faceStatus.innerHTML = `
-                <i class="fas fa-check-circle"></i>
-                <span>Face detected • ${analysisMethod}</span>
-            `;
-            
-            // Show reasoning if available (for Gemini)
-            if (emotionData.reasoning) {
-                elements.faceStatus.title = `Reasoning: ${emotionData.reasoning}`;
-            }
-        } else {
-            elements.faceStatus.classList.remove('detected');
-            elements.faceStatus.innerHTML = '<i class="fas fa-search"></i><span>Looking for face...</span>';
-            elements.faceStatus.title = '';
-        }
-        
-        // Enhanced chat context display
-        if (emotionData.face_detected && emotion !== 'neutral' && confidence >= 30) {
-            elements.emotionContext.style.display = 'flex';
-            elements.contextEmotion.textContent = emotion;
-            
-            // Add confidence level to context
-            const contextLabel = elements.emotionContext.querySelector('.context-label');
-            if (contextLabel) {
-                contextLabel.textContent = `Current mood (${confidence}% confident):`;
-            }
-        } else {
-            elements.emotionContext.style.display = 'none';
-        }
-        
-        // Emotion-specific color themes
-        const emotionColors = {
-            'happy': '#22c55e',
-            'sad': '#6366f1',
-            'angry': '#ef4444',
-            'fear': '#8b5cf6',
-            'surprise': '#f59e0b',
-            'disgust': '#84cc16',
-            'neutral': '#10b981'
-        };
-        
-        const color = emotionColors[emotion] || '#10b981';
-        
-        // Update UI theme based on emotion (subtle effect)
-        document.documentElement.style.setProperty('--emotion-accent', color);
-        
-        // Log detailed emotion data for debugging
-        if (confidence > 50) {
-            console.log(`🎯 ${analysisMethod || this.analysisMethod} detected: ${emotion} (${confidence}% confident)`);
-            if (emotionData.reasoning) {
-                console.log(`💭 Reasoning: ${emotionData.reasoning}`);
-            }
-        }
-    }
-    
     sendMessage() {
         const messageInput = document.getElementById('messageInput');
-        const message = messageInput.value.trim();
+        if (!messageInput) return;
         
-        if (!message && !this.currentImage) return;
+        const message = messageInput.value.trim();
+        if (!message) return;
         
         // Add user message to chat
-        if (message) {
-            this.addEnhancedMessage(message, 'user');
-        }
+        this.addAdvancedMessage(message, 'user');
         
         // Show enhanced typing indicator
-        this.showEnhancedTypingIndicator();
-        
-        // Prepare message data
-        const messageData = { message: message || 'Analyze this image' };
-        if (this.currentImage) {
-            messageData.image = this.currentImage;
-            messageData.image_prompt = message || 'Analyze this image and describe what you see in detail';
-        }
+        this.showAdvancedTypingIndicator();
         
         // Send message to server
-        this.socket.emit('chat_message', messageData);
+        this.socket.emit('chat_message', { message });
         
-        // Clear input and image
+        // Clear input
         messageInput.value = '';
         this.adjustTextareaHeight(messageInput);
-        if (this.currentImage) {
-            this.clearImagePreview();
-        }
     }
     
-    addEnhancedMessage(content, sender, context = null) {
+    addAdvancedMessage(content, sender, context = null) {
         const chatMessages = document.getElementById('chatMessages');
+        if (!chatMessages) return;
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}-message fade-in`;
         
@@ -362,12 +700,14 @@ class EnhancedEmpathyBot {
         
         const timestamp = this.formatTimestamp(new Date());
         
-        // Enhanced emotion context display
+        // Enhanced emotion context display for multi-AI system
         let emotionInfo = '';
         if (sender === 'assistant' && context?.emotion_context && context.emotion_context.emotion !== 'neutral') {
             const emotion = context.emotion_context.emotion;
             const confidence = Math.round((context.emotion_context.confidence || 0) * 100);
-            const method = context.analysis_method || 'Unknown';
+            const modelCount = context.emotion_context.model_count || 1;
+            const agreement = context.emotion_context.agreement_ratio || 0;
+            const method = context.analysis_method || 'Multi-AI';
             
             const emotionEmojis = {
                 'happy': '😊', 'sad': '😢', 'angry': '😠', 
@@ -375,23 +715,29 @@ class EnhancedEmpathyBot {
             };
             
             emotionInfo = `
-                <div class="emotion-context" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.2);">
-                    ${emotionEmojis[emotion] || '💭'}
-                    <span style="font-size: 0.875rem;">Responding to your <strong>${emotion}</strong> mood (${confidence}% confident, detected by ${method})</span>
-                </div>
-            `;
-        }
-        
-        // Enhanced image analysis display
-        let imageAnalysisInfo = '';
-        if (context?.image_analysis) {
-            imageAnalysisInfo = `
-                <div class="image-analysis" style="margin-top: 0.75rem; padding: 1rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 10px;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-weight: 600; color: #8b5cf6;">
-                        <i class="fas fa-eye"></i>
-                        <span>Vision Analysis</span>
+                <div class="advanced-emotion-context">
+                    <div class="context-header">
+                        ${emotionEmojis[emotion] || '💭'}
+                        <span>Responding to your <strong>${emotion}</strong> mood</span>
                     </div>
-                    <div style="font-size: 0.9rem; line-height: 1.5;">${this.formatMessage(context.image_analysis)}</div>
+                    <div class="context-details">
+                        <div class="detail-item">
+                            <i class="fas fa-percentage"></i>
+                            <span>${confidence}% confidence</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-brain"></i>
+                            <span>${modelCount} AI models</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-handshake"></i>
+                            <span>${(agreement * 100).toFixed(0)}% agreement</span>
+                        </div>
+                        <div class="detail-item">
+                            <i class="fas fa-cogs"></i>
+                            <span>${method}</span>
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -401,7 +747,6 @@ class EnhancedEmpathyBot {
             <div class="message-content">
                 <div class="message-text">${this.formatMessage(content)}</div>
                 ${emotionInfo}
-                ${imageAnalysisInfo}
                 <div class="message-time">${timestamp}</div>
             </div>
         `;
@@ -410,111 +755,27 @@ class EnhancedEmpathyBot {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
     
-    showEnhancedTypingIndicator() {
+    showAdvancedTypingIndicator() {
         const indicator = document.getElementById('typingIndicator');
-        const method = this.analysisMethod || 'AI';
+        if (!indicator) return;
+        
+        const modelText = this.modelCount > 0 ? `${this.modelCount} AI models` : 'Multi-AI system';
         indicator.innerHTML = `
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <span style="margin-left: 0.5rem;">${method} is analyzing and responding...</span>
+            <div class="typing-dots">
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+                <div class="typing-dot"></div>
+            </div>
+            <span class="typing-text">${modelText} analyzing and responding...</span>
         `;
         indicator.style.display = 'flex';
     }
     
-    updateAnalysisMethod() {
-        // Update analysis method indicator in the UI
-        const methodIndicator = document.querySelector('.analysis-method-indicator');
-        if (methodIndicator) {
-            methodIndicator.textContent = this.analysisMethod;
+    hideTypingIndicator() {
+        const indicator = document.getElementById('typingIndicator');
+        if (indicator) {
+            indicator.style.display = 'none';
         }
-        
-        // Update emotion detection interval based on method
-        if (this.analysisMethod.includes('Gemini')) {
-            this.emotionUpdateInterval = 2000; // 2 seconds for Gemini to avoid quota issues
-        } else {
-            this.emotionUpdateInterval = 500; // 0.5 seconds for rule-based
-        }
-    }
-    
-    handleImageUpload(file) {
-        if (!file.type.startsWith('image/')) {
-            this.showStatusMessage('Please select a valid image file', 'error');
-            return;
-        }
-        
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
-            this.showStatusMessage('Image size must be less than 10MB', 'error');
-            return;
-        }
-        
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            this.currentImage = e.target.result;
-            this.showImagePreview(e.target.result);
-        };
-        reader.readAsDataURL(file);
-    }
-    
-    showImagePreview(imageData) {
-        const previewContainer = document.getElementById('imagePreview');
-        const previewImage = document.getElementById('previewImage');
-        
-        previewImage.src = imageData;
-        previewContainer.style.display = 'block';
-        previewContainer.classList.add('fade-in');
-    }
-    
-    clearImagePreview() {
-        const previewContainer = document.getElementById('imagePreview');
-        previewContainer.style.display = 'none';
-        this.currentImage = null;
-    }
-    
-    quickCapture() {
-        if (!this.isVideoActive) {
-            this.showStatusMessage('Camera not available', 'error');
-            return;
-        }
-        
-        try {
-            this.canvasElement.width = this.videoElement.videoWidth;
-            this.canvasElement.height = this.videoElement.videoHeight;
-            this.context.drawImage(this.videoElement, 0, 0);
-            
-            const capturedImage = this.canvasElement.toDataURL('image/jpeg', 0.8);
-            this.currentImage = capturedImage;
-            this.showImagePreview(capturedImage);
-            
-            this.showStatusMessage('Image captured successfully!', 'success');
-        } catch (error) {
-            console.error('Capture error:', error);
-            this.showStatusMessage('Failed to capture image', 'error');
-        }
-    }
-    
-    analyzeCurrentImage() {
-        if (!this.currentImage) {
-            this.showStatusMessage('No image to analyze', 'error');
-            return;
-        }
-        
-        this.socket.emit('analyze_image', {
-            image: this.currentImage,
-            prompt: 'Analyze this image in detail and describe everything you see'
-        });
-        
-        this.showStatusMessage('Analyzing image with AI...', 'info');
-    }
-    
-    showImageAnalysis(analysis) {
-        this.addEnhancedMessage('🔍 Image Analysis Result:', 'assistant', { 
-            image_analysis: analysis 
-        });
-    }
-    
-    triggerImageUpload() {
-        document.getElementById('imageInput').click();
     }
     
     formatMessage(message) {
@@ -531,13 +792,9 @@ class EnhancedEmpathyBot {
         });
     }
     
-    hideTypingIndicator() {
-        const indicator = document.getElementById('typingIndicator');
-        indicator.style.display = 'none';
-    }
-    
     toggleVideoStream() {
         const toggleBtn = document.getElementById('toggleCamera');
+        if (!toggleBtn) return;
         
         if (this.isVideoActive) {
             const stream = this.videoElement.srcObject;
@@ -558,53 +815,23 @@ class EnhancedEmpathyBot {
         const statusDot = document.getElementById('connectionStatus');
         const statusText = document.getElementById('statusText');
         
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.textContent = 'Connected';
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.textContent = 'Connecting...';
-        }
-    }
-    
-    updateGeminiStatus() {
-        const geminiStatus = document.getElementById('geminiStatus');
-        const geminiText = document.getElementById('geminiText');
-        
-        if (this.geminiAvailable) {
-            geminiStatus.style.borderColor = 'var(--success)';
-            geminiStatus.style.background = 'rgba(16, 185, 129, 0.1)';
-            geminiText.innerHTML = '<i class="fas fa-brain"></i> Gemini AI Active';
-        } else {
-            geminiStatus.style.borderColor = 'var(--warning)';
-            geminiStatus.style.background = 'rgba(234, 179, 8, 0.1)';
-            geminiText.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Gemini Offline';
+        if (statusDot && statusText) {
+            if (connected) {
+                statusDot.classList.add('connected');
+                statusText.textContent = `Connected (${this.modelCount} AI models)`;
+            } else {
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Connecting...';
+            }
         }
     }
     
     showStatusMessage(message, type = 'info') {
         console.log(`[${type.toUpperCase()}] ${message}`);
         
-        // Create enhanced toast notification
+        // Enhanced toast with model count info
         const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.style.cssText = `
-            position: fixed;
-            top: 100px;
-            right: 2rem;
-            padding: 1rem 1.5rem;
-            border-radius: 12px;
-            color: white;
-            font-size: 0.875rem;
-            font-weight: 500;
-            z-index: 2000;
-            opacity: 0;
-            transform: translateX(100%);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            max-width: 350px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            backdrop-filter: blur(10px);
-        `;
+        toast.className = `advanced-toast toast-${type}`;
         
         const colors = {
             success: '#22c55e',
@@ -620,8 +847,34 @@ class EnhancedEmpathyBot {
             info: 'ℹ️'
         };
         
-        toast.style.background = `linear-gradient(135deg, ${colors[type] || colors.info}, ${colors[type] || colors.info}dd)`;
-        toast.innerHTML = `${icons[type] || icons.info} ${message}`;
+        toast.style.cssText = `
+            position: fixed;
+            top: 100px;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            color: white;
+            font-size: 0.875rem;
+            font-weight: 500;
+            z-index: 2000;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+            background: linear-gradient(135deg, ${colors[type] || colors.info}, ${colors[type] || colors.info}dd);
+        `;
+        
+        toast.innerHTML = `
+            <div class="toast-content">
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <div class="toast-message">
+                    <div class="toast-title">${message}</div>
+                    ${this.modelCount > 0 ? `<div class="toast-subtitle">Multi-AI System (${this.modelCount} models active)</div>` : ''}
+                </div>
+            </div>
+        `;
         
         document.body.appendChild(toast);
         
@@ -640,7 +893,7 @@ class EnhancedEmpathyBot {
                     document.body.removeChild(toast);
                 }
             }, 300);
-        }, 4000);
+        }, 5000);
     }
     
     showCameraError() {
@@ -648,30 +901,14 @@ class EnhancedEmpathyBot {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'camera-error';
         errorDiv.innerHTML = `
-            <div style="
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                text-align: center;
-                color: var(--text-muted);
-                z-index: 10;
-                padding: 2rem;
-            ">
-                <i class="fas fa-video-slash" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.7;"></i>
-                <h4 style="margin-bottom: 0.5rem;">Camera Access Required</h4>
-                <p style="margin: 0.5rem 0; opacity: 0.8;">Please allow camera access to enable ${this.analysisMethod} emotion detection</p>
-                <button onclick="location.reload()" style="
-                    background: var(--primary);
-                    color: white;
-                    border: none;
-                    padding: 0.75rem 1.5rem;
-                    border-radius: 25px;
-                    cursor: pointer;
-                    margin-top: 1rem;
-                    font-weight: 600;
-                    transition: all 0.3s ease;
-                ">
+            <div class="camera-error-content">
+                <i class="fas fa-video-slash camera-error-icon"></i>
+                <h4 class="camera-error-title">Multi-AI Camera Access Required</h4>
+                <p class="camera-error-message">
+                    Please allow camera access to enable advanced emotion detection
+                    using multiple AI models for higher accuracy.
+                </p>
+                <button onclick="location.reload()" class="camera-retry-btn">
                     <i class="fas fa-redo"></i> Try Again
                 </button>
             </div>
@@ -689,17 +926,8 @@ class EnhancedEmpathyBot {
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Initializing Enhanced Empathetic AI with Gemini Vision...');
-    new EnhancedEmpathyBot();
-});
-
-// Handle page visibility for performance optimization
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        console.log('📱 Page hidden - optimizing performance');
-    } else {
-        console.log('📱 Page visible - resuming full operation');
-    }
+    console.log('🚀 Initializing Advanced Multi-AI Emotion Detection System...');
+    new AdvancedMultiAIEmpathyBot();
 });
 
 // Enhanced keyboard shortcuts
@@ -709,76 +937,37 @@ document.addEventListener('keydown', (e) => {
         const messageInput = document.getElementById('messageInput');
         if (document.activeElement === messageInput) {
             e.preventDefault();
-            document.getElementById('sendBtn').click();
+            document.getElementById('sendBtn')?.click();
         }
     }
     
-    // Escape to clear image preview
-    if (e.key === 'Escape') {
-        const previewContainer = document.getElementById('imagePreview');
-        if (previewContainer.style.display !== 'none') {
-            document.getElementById('clearBtn').click();
-        }
+    // F1 to toggle trends panel
+    if (e.key === 'F1') {
+        e.preventDefault();
+        document.getElementById('toggleTrends')?.click();
     }
     
-    // Ctrl/Cmd + I to trigger image upload
-    if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+    // F2 to toggle detailed scores
+    if (e.key === 'F2') {
         e.preventDefault();
-        document.getElementById('imageBtn').click();
-    }
-    
-    // Ctrl/Cmd + Space to capture image
-    if ((e.ctrlKey || e.metaKey) && e.key === ' ') {
-        e.preventDefault();
-        document.getElementById('quickCapture').click();
+        document.getElementById('toggleScores')?.click();
     }
 });
 
-// Add CSS for emotion-based theming
-const style = document.createElement('style');
-style.textContent = `
-    :root {
-        --emotion-accent: #10b981;
+// Performance monitoring
+let performanceMetrics = {
+    frameProcessingTimes: [],
+    emotionDetectionAccuracy: [],
+    modelAgreementScores: []
+};
+
+// Log performance data
+setInterval(() => {
+    if (performanceMetrics.frameProcessingTimes.length > 0) {
+        const avgProcessingTime = performanceMetrics.frameProcessingTimes.reduce((a, b) => a + b, 0) / performanceMetrics.frameProcessingTimes.length;
+        console.log(`📊 Performance: Avg frame processing ${avgProcessingTime.toFixed(2)}ms`);
+        
+        // Reset metrics
+        performanceMetrics.frameProcessingTimes = [];
     }
-    
-    .emotion-transition {
-        animation: emotionPulse 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    @keyframes emotionPulse {
-        0% {
-            transform: scale(1);
-        }
-        30% {
-            transform: scale(1.15);
-            filter: drop-shadow(0 0 20px var(--emotion-accent));
-        }
-        100% {
-            transform: scale(1);
-        }
-    }
-    
-    .confidence-fill {
-        transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    .face-status.detected {
-        animation: detectPulse 0.6s ease-out;
-    }
-    
-    @keyframes detectPulse {
-        0% {
-            transform: scale(1);
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
-        }
-        50% {
-            transform: scale(1.02);
-            box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
-        }
-        100% {
-            transform: scale(1);
-            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-        }
-    }
-`;
-document.head.appendChild(style);
+}, 30000); // Log every 30 seconds
